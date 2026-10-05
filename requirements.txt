@@ -1,0 +1,2 @@
+# CDP 读 DOM 需要 WebSocket
+websocket-client>=1.8.0
