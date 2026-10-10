@@ -1,12 +1,28 @@
 """
 CDP Launcher — single .exe (via PyInstaller)
 Double-click: kill old → start Chrome CDP → start TCP proxy → WSL can connect
-FIX v2: proxy now connects via IPv6 ([::1]) since Chrome only responds on IPv6
+FIX v3: proxy connects Chrome via IPv4-then-IPv6 fallback (Chrome 版本不同监听不同)
 """
 import os, sys, subprocess, time, socket, threading, ctypes
 
-BIND = ('0.0.0.0', 9222)
-TARGET = ('127.0.0.1', 9222)
+BIND = ('0.0.0.0', 9222)  # 对外监听 IPv4（WSL 经 172.27.64.1 连）
+
+
+def connect_chrome():
+    """连调试 Chrome：先 IPv4 127.0.0.1，失败再 IPv6 ::1（Chrome 版本不同监听不同）。"""
+    for family, addr in ((socket.AF_INET, ('127.0.0.1', 9222)),
+                         (socket.AF_INET6, ('::1', 9222))):
+        try:
+            s = socket.socket(family, socket.SOCK_STREAM)
+            s.settimeout(3)
+            s.connect(addr)
+            return s
+        except Exception:
+            try:
+                s.close()
+            except Exception:
+                pass
+    return None
 
 def is_admin():
     try: return ctypes.windll.shell32.IsUserAnAdmin()
@@ -43,9 +59,10 @@ def start_chrome():
 
 def proxy_handle(client, addr):
     try:
-        remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        remote = connect_chrome()
+        if remote is None:
+            return
         remote.settimeout(30)
-        remote.connect(TARGET)
         client.settimeout(30)
         def forward(src, dst):
             try:
@@ -85,14 +102,11 @@ def main():
     
     # Test Chrome is ready
     for _ in range(10):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2)
-            s.connect(('127.0.0.1', 9222))
+        s = connect_chrome()
+        if s:
             s.close()
             break
-        except:
-            time.sleep(1)
+        time.sleep(1)
 
     print("CDP Ready — WSL: curl http://172.27.64.1:9222/json")
     

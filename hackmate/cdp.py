@@ -255,22 +255,74 @@ def _wsl_to_windows_path(path):
 def find_launcher():
     """找 cdp_launcher.exe（HackMate 项目目录下）。"""
     base = Path(__file__).resolve().parent.parent  # HackMate 根目录
-    for rel in ("cdp_tools/cdp_launcher.exe", "tool/cdp_tools/cdp_launcher.exe"):
+    for rel in ("tools/cdp/launcher/cdp_launcher.exe",):
         p = base / rel
         if p.exists():
             return str(p)
     return None
 
 
-def launch_cdp():
-    """启动 cdp_launcher.exe（Windows/WSL）。返回 True 表示已触发。"""
+def _find_chrome():
+    """跨平台找 Chrome 可执行文件路径。"""
+    import shutil
+    for name in ("google-chrome", "chromium", "chromium-browser", "google-chrome-stable"):
+        p = shutil.which(name)
+        if p:
+            return p
+    mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if Path(mac).exists():
+        return mac
+    for c in (
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Chromium\Application\chrome.exe",
+    ):
+        if Path(c).exists():
+            return c
+    return None
+
+
+def _cleanup_wsl_cdp():
+    """WSL：kill 所有 cdp_launcher + 调试 Chrome（清多实例，启动前必调）。"""
+    cmd = (
+        "Get-Process -Name cdp_launcher -ErrorAction SilentlyContinue | Stop-Process -Force; "
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Where-Object { $_.CommandLine -match 'remote-debugging-port' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(["powershell.exe", "-Command", cmd], capture_output=True, timeout=20)
+    except Exception:
+        pass
+
+
+def launch_chrome(port=9222):
+    """跨平台启动调试 Chrome。返回 True 表示已触发。
+
+    - Windows（原生 + WSL）：有 cdp_launcher.exe，走 proxy（清多实例后启动）。
+    - Linux / macOS：没有 cdp_launcher.exe，直接 chrome --remote-debugging-port。
+    """
     launcher = find_launcher()
-    if not launcher:
+    if launcher:  # Windows：用 cdp_launcher.exe proxy
+        _cleanup_wsl_cdp()  # kill 旧 cdp_launcher + 调试 Chrome（清多实例）
+        time.sleep(2)
+        win_path = _wsl_to_windows_path(launcher)
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-Command", f"Start-Process '{win_path}'"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return True
+        except (FileNotFoundError, OSError):
+            return False
+    # Linux / macOS：直接 chrome
+    chrome = _find_chrome()
+    if not chrome:
         return False
-    win_path = _wsl_to_windows_path(launcher)
     try:
         subprocess.Popen(
-            ["powershell.exe", "-Command", f"Start-Process '{win_path}'"],
+            [chrome, f"--remote-debugging-port={port}", "--remote-allow-origins=*",
+             f"--user-data-dir={Path.home() / '.hackmate-chrome'}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         return True
@@ -290,8 +342,34 @@ def wait_for_cdp(host, port, timeout=25):
     return False
 
 
+def resolve_cdp_host(host="localhost"):
+    """解析 CDP host：WSL 环境下 localhost 需换成 WSL 网关 IP（否则连不到 Windows 的 Chrome proxy）。
+
+    Windows / Linux 原生：/proc/version 不含 microsoft/wsl，返回原 host（localhost 正确）。
+    WSL：检测到则解析 `ip route show default` 的网关 IP（如 172.27.64.1）。
+    """
+    if host not in ("localhost", "127.0.0.1", "::1"):
+        return host  # 用户已显式配置非 localhost，尊重之
+    try:
+        with open("/proc/version", "r") as f:
+            ver = f.read().lower()
+        if "microsoft" in ver or "wsl" in ver:
+            import subprocess
+            out = subprocess.run(["ip", "route", "show", "default"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            parts = out.split()
+            if "via" in parts:
+                gw = parts[parts.index("via") + 1]
+                if gw:
+                    return gw
+    except Exception:
+        pass
+    return host
+
+
 def ensure_cdp(host, port, auto_launch=True, timeout=25):
     """确保 CDP 就绪；没开则自动拉起 cdp_launcher 并等待。返回 CDPClient 或 None。"""
+    host = resolve_cdp_host(host)  # WSL 环境 localhost → 网关 IP
     c = CDPClient(host, port)
     try:
         c._get_json("/json/version")
@@ -299,8 +377,8 @@ def ensure_cdp(host, port, auto_launch=True, timeout=25):
     except CDPError:
         pass
 
-    if auto_launch and launch_cdp():
-        print("[cdp] 已触发 cdp_launcher，等待 CDP 就绪（如弹 UAC/MessageBox 请点确认）...")
+    if auto_launch and launch_chrome():
+        print("[cdp] 已触发 Chrome 启动，等待 CDP 就绪（如弹 UAC/MessageBox 请点确认）...")
         if wait_for_cdp(host, port, timeout):
             print("[cdp] CDP 已就绪")
             return c

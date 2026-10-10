@@ -5,3 +5,7 @@ config.json
 # Python
 __pycache__/
 *.pyc
+
+# PyInstaller 编译产物
+build/
+dist/

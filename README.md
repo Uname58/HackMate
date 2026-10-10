@@ -17,9 +17,8 @@ HackMate/
 │   └── eval.py            # eval 裁判（case → grader → 分）
 ├── memorys/               # 三层记忆数据（见 memorys/README.md）
 ├── skills/                # 漏洞知识（见 skills/README.md）
-├── tools/                 # 执行工具（schema.json 给 LLM + how2use.md 给人）
+├── tools/cdp/             # CDP 工具（schema.json + how2use.md + launcher/ 启动器）
 ├── evals/                 # eval 测试集（输入→期望）
-└── cdp_tools/             # Windows 侧 CDP launcher
 ```
 
 ## 运行

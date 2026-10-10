@@ -29,6 +29,7 @@ HELP = """命令:
   /cdp html N  读第 N 个页面的 DOM HTML
   /skill       列出可用的漏洞知识（skills/）
   /skill <vuln>  把某类漏洞知识注入上下文（如 /skill xss）
+  /skill improve <vuln> <variant>  改进 skill（LLM 生成候选 → eval 判分 → 涨保留/跌回滚）
   /memory      查看长记忆 + 当前项目状态
   /memory pref <text>   追加一条偏好到长记忆
   /memory project <text>  写当前项目状态（中记忆）
@@ -155,9 +156,15 @@ def main():
     _cdp = {"client": None}
 
     def ensure_cdp_client():
-        if _cdp["client"] is None:
-            from .cdp import ensure_cdp
-            _cdp["client"] = ensure_cdp(cfg["cdp_host"], int(cfg["cdp_port"]))
+        from .cdp import ensure_cdp
+        # 缓存失效：CDP 可能已死（如用户关了 Chrome），检测不活则重新拉起
+        if _cdp["client"] is not None:
+            try:
+                _cdp["client"]._get_json("/json/version")
+                return _cdp["client"]
+            except Exception:
+                _cdp["client"] = None
+        _cdp["client"] = ensure_cdp(cfg["cdp_host"], int(cfg["cdp_port"]))
         return _cdp["client"]
 
     def execute_tool(name, args):
@@ -224,9 +231,40 @@ def main():
             print(HELP)
             continue
 
-        # --- /skill 命令：查看/注入漏洞知识 ---
+        # --- /skill 命令：查看/注入/改进漏洞知识 ---
         if line == "/skill" or line.startswith("/skill "):
             parts = line.split()
+            # /skill improve <vuln> <variant>：LLM 生成候选 → eval gate 判分
+            if len(parts) >= 2 and parts[1] == "improve":
+                if len(parts) < 4:
+                    print("用法：/skill improve <vuln> <variant>（如 /skill improve xss reflection_xss）")
+                    continue
+                from . import eval as ev
+                vuln, variant = parts[2], parts[3]
+                vpath = skill.get_variant_path(vuln, variant)
+                if not vpath.exists():
+                    print(f"[skill] 没有 {vuln}/{variant}")
+                    continue
+                cases = ev.load_group(vuln, "regression")
+                if not cases:
+                    print(f"[skill] {vuln} 没有 regression case，无法 eval 判分")
+                    continue
+                current = vpath.read_text(encoding="utf-8")
+                gen = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"],
+                                "你是 HackMate 的 skill 改进器，只输出改进后的完整 skill 内容（markdown），不要任何解释或代码块标记。")
+                prompt = (f"当前 {vuln}/{variant} 的 skill 内容：\n\n{current}\n\n"
+                          f"请补充/修正漏洞知识，输出改进后的完整内容。")
+                print("[skill] 正在生成候选改进...")
+                try:
+                    candidate = gen.chat(prompt)["content"]
+                except LLMError as e:
+                    print(f"[skill] 生成候选失败: {e}")
+                    continue
+                eval_fn = skill.make_skill_eval_fn(vuln, cases)
+                kept, before, after = skill.improve_skill(vuln, variant, candidate, eval_fn)
+                print(f"[skill] eval gate：改进前 {before:.0%} → 改进后 {after:.0%}")
+                print("[skill] ✓ 分数未跌，候选已保留" if kept else "[skill] ✗ 分数下跌，已自动回滚")
+                continue
             if len(parts) == 1:
                 vulns = skill.list_vulns()
                 print(skill.summary() if vulns else "[skill] 还没有任何漏洞知识（skills/ 为空）")

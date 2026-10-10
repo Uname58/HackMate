@@ -92,6 +92,26 @@ def summary() -> str:
     return "\n".join(lines)
 
 
+def make_skill_eval_fn(vuln: str, cases: list):
+    """返回 eval_fn：检查 skill 内容覆盖 eval case 关键绕过手法（keyword）的比例（0-1）。
+
+    这是「完整性检查」（思路 A）：验证改进后的 skill 没有丢失关键绕过知识。
+    keyword 优先，缺省回退到 expected。思路 B（用 skill 跑 LLM 产 payload 再判分）
+    更精确但需 LLM 调用，留后续。
+    """
+    def eval_fn():
+        content = load_skill(vuln)
+        if not cases:
+            return 0.0
+        passed = 0
+        for c in cases:
+            kw = c.get("keyword") or c.get("expected", "")
+            if kw and kw in content:
+                passed += 1
+        return passed / len(cases)
+    return eval_fn
+
+
 def improve_skill(vuln: str, variant: str, new_content: str, eval_fn):
     """改进 skill，带 eval gate。
 
