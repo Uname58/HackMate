@@ -1,0 +1,19 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "save_project",
+      "description": "把当前项目的关键进展写入中记忆（memorys/project/current.md），重启后仍保留。整体覆盖旧内容。当用户在对话中确定新目标、有重要发现、或阶段收尾时主动调用，避免遗漏。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "当前项目状态摘要，用简洁要点记录：目标 / 已发现 / 下一步。"
+          }
+        },
+        "required": ["note"]
+      }
+    }
+  }
+]

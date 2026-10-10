@@ -1,0 +1,19 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "save_case",
+      "description": "把刚打通的靶场沉淀成一个 eval case，写进 hidden 集（用于防过拟合验收）。仅在靶场 Solved / verify_xss 返回 CONFIRMED 后调用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "vuln": {"type": "string", "description": "漏洞大类，如 xss"},
+          "input": {"type": "string", "description": "场景描述：反射点落在哪个上下文、有什么过滤/编码"},
+          "expected": {"type": "string", "description": "成功触发执行的 payload"},
+          "keyword": {"type": "string", "description": "绕过手法关键词，如「JS 字符串 breakout」「document.write sink」"}
+        },
+        "required": ["vuln", "input", "expected"]
+      }
+    }
+  }
+]

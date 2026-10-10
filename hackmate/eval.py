@@ -20,9 +20,12 @@ grader 类型（从便宜到贵）：
 
 import json
 import re
+import time
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # HackMate 根目录
+from .config import app_root
+
+BASE_DIR = app_root()  # HackMate 根目录
 EVALS_DIR = BASE_DIR / "evals"
 
 
@@ -89,3 +92,28 @@ def format_report(passed: int, total: int, details: list) -> str:
         mark = "✓" if d["ok"] else "✗"
         lines.append(f"  {mark} {d['id']}")
     return "\n".join(lines)
+
+
+def record_transcript(vuln: str, case: dict, payload: str, ok: bool) -> None:
+    """把一次判分追加到 transcript（JSONL），用于失败根因定位。"""
+    p = EVALS_DIR / vuln / "transcripts" / f"{time.strftime('%Y%m%d')}.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    entry = json.dumps({
+        "id": case.get("id", "?"),
+        "input": case.get("input", ""),
+        "payload": payload,
+        "ok": ok,
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }, ensure_ascii=False)
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(entry + "\n")
+
+
+def append_case(vuln: str, group: str, case: dict) -> str:
+    """把一个 case 追加到 evals/<vuln>/<group>.json，返回状态描述。"""
+    p = EVALS_DIR / vuln / f"{group}.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    cases = load_cases(p) if p.exists() else []
+    cases.append(case)
+    p.write_text(json.dumps(cases, ensure_ascii=False, indent=2), encoding="utf-8")
+    return f"case 已沉淀进 {group} 集（当前 {len(cases)} 个）"

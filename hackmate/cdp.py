@@ -11,6 +11,8 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+from .config import app_root
+
 try:
     import websocket  # websocket-client，用于读 DOM
     _HAS_WS = True
@@ -254,7 +256,7 @@ def _wsl_to_windows_path(path):
 
 def find_launcher():
     """找 cdp_launcher.exe（HackMate 项目目录下）。"""
-    base = Path(__file__).resolve().parent.parent  # HackMate 根目录
+    base = app_root()  # HackMate 根目录
     for rel in ("tools/cdp/launcher/cdp_launcher.exe",):
         p = base / rel
         if p.exists():

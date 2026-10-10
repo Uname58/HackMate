@@ -11,7 +11,9 @@ skills/<vuln>/                # 一个 vuln 大类一个目录（xss / sqli / cm
 import time
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # HackMate 根目录
+from .config import app_root
+
+BASE_DIR = app_root()  # HackMate 根目录
 SKILLS_DIR = BASE_DIR / "skills"
 
 
@@ -54,20 +56,23 @@ def get_variant_path(vuln: str, variant: str) -> Path:
 
 
 def write_skill(vuln: str, variant: str, content: str, backup: bool = True) -> str:
-    """写 / 更新某个 skill 文件。默认先备份（.bak-时间戳）。"""
+    """写 / 更新某个 skill 文件。默认先备份到 backups/（.bak-时间戳）。"""
     p = get_variant_path(vuln, variant)
     p.parent.mkdir(parents=True, exist_ok=True)
     if backup and p.exists():
-        bak = p.with_suffix(p.suffix + f".bak-{time.strftime('%Y%m%d%H%M%S')}")
+        bak_dir = p.parent / "backups"
+        bak_dir.mkdir(parents=True, exist_ok=True)
+        bak = bak_dir / f"{variant}.md.bak-{time.strftime('%Y%m%d%H%M%S')}"
         bak.write_text(_read(p), encoding="utf-8")
     p.write_text(content, encoding="utf-8")
     return str(p)
 
 
 def rollback_skill(vuln: str, variant: str) -> bool:
-    """回滚到最近一次备份。"""
+    """回滚到最近一次备份（从 backups/ 目录）。"""
     p = get_variant_path(vuln, variant)
-    baks = sorted(p.parent.glob(f"{variant}.md.bak-*"))
+    bak_dir = p.parent / "backups"
+    baks = sorted(bak_dir.glob(f"{variant}.md.bak-*")) if bak_dir.exists() else []
     if not baks:
         return False
     latest = baks[-1]
@@ -92,13 +97,45 @@ def summary() -> str:
     return "\n".join(lines)
 
 
-def make_skill_eval_fn(vuln: str, cases: list):
-    """返回 eval_fn：检查 skill 内容覆盖 eval case 关键绕过手法（keyword）的比例（0-1）。
+def make_skill_eval_fn(vuln: str, cases: list, llm_client=None, trials: int = 2):
+    """返回 eval_fn，用于 improve_skill 的 eval gate。
 
-    这是「完整性检查」（思路 A）：验证改进后的 skill 没有丢失关键绕过知识。
-    keyword 优先，缺省回退到 expected。思路 B（用 skill 跑 LLM 产 payload 再判分）
-    更精确但需 LLM 调用，留后续。
+    - 思路 B（llm_client 提供）：把 skill 喂给 LLM，针对每个 case 的 input 产 payload，
+      再对 expected 判分。每个 case 跑 trials 次取成功率（消除 LLM 随机性）。
+    - 思路 A（llm_client=None）：完整性检查（keyword 覆盖）—— 防退化，粗粒度。
     """
+    if llm_client is not None:
+        from .eval import grade_case, record_transcript
+
+        def eval_fn():
+            content = load_skill(vuln)
+            if not cases:
+                return 0.0
+            passed = total = 0
+            for i, c in enumerate(cases, 1):
+                for _ in range(trials):
+                    llm_client.clear()
+                    prompt = (
+                        "你是渗透测试专家。根据以下漏洞知识：\n\n"
+                        f"{content}\n\n"
+                        f"针对场景：{c.get('input', '')}\n\n"
+                        "只输出一个 XSS payload，不要任何解释或代码块。"
+                    )
+                    try:
+                        payload = llm_client.chat(prompt)["content"].strip()
+                        ok = grade_case(c, payload)
+                    except Exception as e:
+                        payload = f"<error: {e}>"
+                        ok = False
+                    total += 1
+                    if ok:
+                        passed += 1
+                    record_transcript(vuln, c, payload, ok)
+                print(f"  [eval] {i}/{len(cases)} {c.get('id', '?')} 判分完成")
+            return passed / total if total else 0.0
+
+        return eval_fn
+
     def eval_fn():
         content = load_skill(vuln)
         if not cases:
@@ -109,6 +146,7 @@ def make_skill_eval_fn(vuln: str, cases: list):
             if kw and kw in content:
                 passed += 1
         return passed / len(cases)
+
     return eval_fn
 
 

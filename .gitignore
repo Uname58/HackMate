@@ -9,3 +9,7 @@ __pycache__/
 # PyInstaller 编译产物
 build/
 dist/
+
+# eval 运行时产物
+evals/*/transcripts/
+skills/*/backups/

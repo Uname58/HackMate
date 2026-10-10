@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 import json
 from pathlib import Path
 
@@ -20,8 +21,14 @@ DEFAULTS = {
     "system_prompt": "You are a pentest copilot. Be concise, technical, and honest.",
     "cdp_host": "localhost",
     "cdp_port": 9222,
-    "allowed_hosts": [],  # 授权测试的域名白名单（空 = 未授权任何目标，受控操作全拦截）
 }
+
+
+def app_root():
+    """HackMate 根目录。打包成 exe 时用 exe 所在目录，开发时用源码目录。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
 
 
 def _first_env(*names):
@@ -60,15 +67,6 @@ def load_dotenv(paths=None):
                 os.environ[key] = value
 
 
-def _parse_hosts(v):
-    """把 allowed_hosts 解析成 list（支持 list / 逗号分隔字符串）。"""
-    if isinstance(v, list):
-        return [str(h).strip() for h in v if str(h).strip()]
-    if isinstance(v, str):
-        return [h.strip() for h in v.split(",") if h.strip()]
-    return []
-
-
 def load_config():
     load_dotenv()
     cfg = dict(DEFAULTS)
@@ -84,8 +82,6 @@ def load_config():
             for key in ("api_key", "base_url", "model", "system_prompt", "cdp_host", "cdp_port"):
                 if key in data and data[key]:
                     cfg[key] = data[key]
-            if "allowed_hosts" in data:
-                cfg["allowed_hosts"] = _parse_hosts(data["allowed_hosts"])
 
     # 2) 环境变量（最高优先级，覆盖 config 文件）
     v = _first_env("HACKMATE_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY")
@@ -101,9 +97,5 @@ def load_config():
         v = os.environ.get(env)
         if v:
             cfg[key] = v
-
-    v = _first_env("HACKMATE_ALLOWED_HOSTS")
-    if v:
-        cfg["allowed_hosts"] = _parse_hosts(v)
 
     return cfg

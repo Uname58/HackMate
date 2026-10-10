@@ -13,7 +13,9 @@
 import time
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # HackMate 根目录
+from .config import app_root
+
+BASE_DIR = app_root()  # HackMate 根目录
 MEMORY_DIR = BASE_DIR / "memorys"
 LONG_DIR = MEMORY_DIR / "long"
 PROJECT_DIR = MEMORY_DIR / "project"

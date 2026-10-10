@@ -5,37 +5,32 @@
 
 import sys
 import json
+import argparse
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config, app_root
 from .llm import LLMClient, LLMError
 from . import memory, skill
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # HackMate 根目录
+BASE_DIR = app_root()  # HackMate 根目录
 TOOLS_DIR = BASE_DIR / "tools"
 
-# 工具权限分类 —— 权限边界在工具执行层强制（不靠 prompt）
-READ_ONLY_TOOLS = {"list_tabs", "read_page_text", "find_xss_entries"}
-CONTROLLED_TOOLS = {"navigate", "open_new_tab", "fill_form", "click", "verify_xss"}
-HIGH_RISK_TOOLS = set()  # 第一周留空（改变业务数据 / 越权 / 破坏性操作）
-
 BANNER = "HackMate v0.2 — AI 渗透情报副驾驶 (CLI)"
+
+
+def _yellow(text):
+    """终端黄色文字（ANSI 转义）。"""
+    return f"\033[33m{text}\033[0m"
 
 HELP = """命令:
   /help        显示本帮助
   /clear       清空上下文（保留 system prompt）
   /cdp         查看当前 Chrome 打开的页面（带序号，注入上下文）
   /cdp read N  读第 N 个页面的可见文本
-  /cdp html N  读第 N 个页面的 DOM HTML
   /skill       列出可用的漏洞知识（skills/）
-  /skill <vuln>  把某类漏洞知识注入上下文（如 /skill xss）
-  /skill improve <vuln> <variant>  改进 skill（LLM 生成候选 → eval 判分 → 涨保留/跌回滚）
   /memory      查看长记忆 + 当前项目状态
-  /memory pref <text>   追加一条偏好到长记忆
-  /memory project <text>  写当前项目状态（中记忆）
-  /memory reset-project   切换项目：清空中记忆
   /exit        退出（也可用 exit / quit / Ctrl+C）
-  其它任意输入都会发给 LLM 对话（LLM 可自动调用浏览器工具）
+  其它任意输入都会发给 LLM 对话（LLM 可自动调用浏览器/skill 工具）
 """
 
 
@@ -53,70 +48,84 @@ def load_tools():
     return tools
 
 
-def _host_from_url(url):
-    """从 URL 提取 hostname（不带端口）。空 / 非法 URL 返回 ''。"""
-    from urllib.parse import urlparse
-    try:
-        return urlparse(url).hostname or ""
-    except Exception:
-        return ""
-
-
-def _authorized(host, allowed_hosts):
-    """检查 host 是否在授权白名单。空白名单 = 未授权任何目标。"""
-    if not host or not allowed_hosts:
-        return False
-    return host in allowed_hosts or any(host.endswith("." + h) for h in allowed_hosts if h)
-
-
-def _target_host(name, args, cdp):
-    """从工具参数提取目标 host（用于授权检查）。"""
-    if name in ("navigate", "open_new_tab", "verify_xss"):
-        return _host_from_url(args.get("url", ""))
-    if name in ("fill_form", "click"):
-        idx = int(args.get("index", 0))
-        try:
-            tabs = cdp.list_tabs()
-            if 0 <= idx < len(tabs):
-                return _host_from_url(tabs[idx]["url"])
-        except Exception:
-            pass
-        return ""
-    return ""
-
-
-def _check_authorized(name, args, cdp, allowed_hosts):
-    """权限检查。返回 None=放行，返回字符串=拦截原因。"""
-    if name not in CONTROLLED_TOOLS and name not in HIGH_RISK_TOOLS:
-        return None  # 只读工具，放行
-    if name in ("navigate", "open_new_tab", "verify_xss"):
-        url = (args.get("url") or "").strip()
-        if url.lower() == "about:blank" or url == "":
-            return None  # 空白页，无目标，放行
-        host = _host_from_url(url)
-    else:  # fill_form / click：作用在当前 tab
-        host = _target_host(name, args, cdp)
-    if not _authorized(host, allowed_hosts):
-        return (f"权限拦截：目标 {host or '（无法解析的 URL，如 javascript:/data:）'} 不在授权白名单。"
-                f"当前授权：{allowed_hosts or '无'}。需人工授权后才能执行。")
-    return None
-
-
 def build_system_prompt(cfg):
-    """闭环起点：长记忆（system prompt + 偏好）+ skill 目录摘要 拼成 system prompt。"""
+    """闭环起点：长记忆（system prompt + 偏好）+ 中记忆（项目状态）+ skill 目录摘要 拼成 system prompt。"""
     parts = []
     sp = memory.load_system_prompt()
     parts.append(sp if sp else cfg["system_prompt"])
     prefs = memory.load_preferences()
     if prefs:
         parts.append("## 用户偏好\n" + prefs)
+    proj = memory.load_project()
+    if proj:
+        parts.append("## 当前项目状态（中记忆，重启后保留）\n" + proj)
     sk = skill.summary()
     if sk:
         parts.append(sk + "\n（用 /skill <vuln> 查看某类漏洞的完整知识）")
     return "\n\n".join(parts)
 
 
-def main():
+def cmd_skill():
+    """列出漏洞知识。"""
+    vulns = skill.list_vulns()
+    print(skill.summary() if vulns else "还没有任何漏洞知识（skills/ 为空）")
+    return 0
+
+
+def cmd_cdp(args):
+    """列出 / 读 Chrome 页面。"""
+    from .cdp import resolve_cdp_host, ensure_cdp
+    cfg = load_config()
+    host = resolve_cdp_host(cfg["cdp_host"])
+    c = ensure_cdp(host, int(cfg["cdp_port"]))
+    if c is None:
+        print("[cdp] CDP 未就绪")
+        return 1
+    tabs = c.list_tabs()
+    if args.action == "read":
+        if not (0 <= args.index < len(tabs)):
+            print(f"[cdp] 序号 {args.index} 超出范围（0-{len(tabs)-1}）")
+            return 1
+        print(c.read_page_text(tabs[args.index]))
+    else:
+        if not tabs:
+            print("[cdp] 没有页面 tab")
+            return 0
+        for i, t in enumerate(tabs):
+            print(f"- {i}: {t['title']}  |  {t['url']}")
+    return 0
+
+
+def cmd_memory():
+    """查看偏好 + 当前项目。"""
+    prefs = memory.load_preferences() or "(空)"
+    proj = memory.load_project() or "(空)"
+    print("=== 用户偏好（长记忆）===\n" + prefs)
+    print("\n=== 当前项目（中记忆）===\n" + proj)
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="hackmate", description="HackMate — AI 渗透情报副驾驶")
+    sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("chat", help="进入交互式对话（默认）")
+    sub.add_parser("skill", help="列出漏洞知识")
+    p_cdp = sub.add_parser("cdp", help="列出 / 读 Chrome 页面")
+    p_cdp.add_argument("action", nargs="?", choices=["read"], help="read 读第 index 页")
+    p_cdp.add_argument("index", nargs="?", type=int, default=0, help="页面序号")
+    sub.add_parser("memory", help="查看长记忆 + 当前项目")
+    args = parser.parse_args(argv)
+
+    if args.cmd == "skill":
+        return cmd_skill()
+    if args.cmd == "cdp":
+        return cmd_cdp(args)
+    if args.cmd == "memory":
+        return cmd_memory()
+    return chat_loop()
+
+
+def chat_loop():
     cfg = load_config()
 
     if not cfg["api_key"]:
@@ -140,7 +149,6 @@ def main():
     client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], system_prompt)
 
     tools = load_tools()
-    allowed_hosts = cfg.get("allowed_hosts", [])
 
     print(BANNER)
     print(f"模型: {cfg['model']}  |  端点: {cfg['base_url']}")
@@ -169,15 +177,57 @@ def main():
 
     def execute_tool(name, args):
         """执行 LLM 请求的工具，返回结果字符串。"""
+        # 不依赖 CDP 的工具先处理
+        if name == "save_project":
+            memory.save_project(args.get("note", ""))
+            return "中记忆已保存"
+        if name == "save_case":
+            import time as _t
+            from . import eval as ev
+            vuln = args.get("vuln", "")
+            case = {
+                "id": f"auto-{_t.strftime('%Y%m%d%H%M%S')}",
+                "input": args.get("input", ""),
+                "expected": args.get("expected", ""),
+                "grader": "contains",
+                "keyword": args.get("keyword", ""),
+            }
+            return ev.append_case(vuln, "hidden", case)
+        if name == "load_skill":
+            content = skill.load_skill(args.get("vuln", ""))
+            return content if content else "没有该漏洞的知识"
+        if name == "improve_skill":
+            from . import eval as ev
+            vuln = args.get("vuln", "")
+            variant = args.get("variant", "")
+            vpath = skill.get_variant_path(vuln, variant)
+            is_new = not vpath.exists()
+            cases = ev.load_group(vuln, "regression")
+            if not cases:
+                return f"{vuln} 没有 regression case，无法 eval 判分"
+            current = vpath.read_text(encoding="utf-8") if vpath.exists() else ""
+            gen = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"],
+                            "你是 HackMate 的 skill 改进器，只输出改进后的完整 skill 内容（markdown），不要任何解释或代码块标记。")
+            prompt = (f"当前 {vuln}/{variant} 的 skill 内容：\n\n{current}\n\n"
+                      f"请补充/修正漏洞知识，输出改进后的完整内容。")
+            try:
+                print(_yellow(f"生成 {vuln}/{variant} 候选 skill 中..."))
+                candidate = gen.chat(prompt)["content"]
+            except LLMError as e:
+                return f"生成候选失败: {e}"
+            print(_yellow(f"eval gate 判分中（{len(cases)} case × 2 轮，约 {len(cases)*2*2} 次 LLM 调用，稍等）..."))
+            eval_client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], "")
+            eval_fn = skill.make_skill_eval_fn(vuln, cases, eval_client)
+            kept, before, after = skill.improve_skill(vuln, variant, candidate, eval_fn)
+            if kept:
+                if is_new:
+                    print(_yellow(f'hackmate>！！！发现skill "{variant}"'))
+                else:
+                    print(_yellow(f'hackmate>！！！改进skill "{variant}"'))
+            return f"eval gate：改进前 {before:.0%} → 改进后 {after:.0%}，" + ("已保留" if kept else "已回滚")
         cdp = ensure_cdp_client()
         if cdp is None:
             return "错误：CDP 未就绪，无法执行浏览器操作"
-
-        # 权限边界：受控/高风险操作先过授权检查（模型请求 ≠ 操作获准）
-        deny = _check_authorized(name, args, cdp, allowed_hosts)
-        if deny:
-            print(f"  [权限] {deny}")
-            return deny
         try:
             if name == "list_tabs":
                 tabs = cdp.list_tabs()
@@ -231,73 +281,18 @@ def main():
             print(HELP)
             continue
 
-        # --- /skill 命令：查看/注入/改进漏洞知识 ---
-        if line == "/skill" or line.startswith("/skill "):
-            parts = line.split()
-            # /skill improve <vuln> <variant>：LLM 生成候选 → eval gate 判分
-            if len(parts) >= 2 and parts[1] == "improve":
-                if len(parts) < 4:
-                    print("用法：/skill improve <vuln> <variant>（如 /skill improve xss reflection_xss）")
-                    continue
-                from . import eval as ev
-                vuln, variant = parts[2], parts[3]
-                vpath = skill.get_variant_path(vuln, variant)
-                if not vpath.exists():
-                    print(f"[skill] 没有 {vuln}/{variant}")
-                    continue
-                cases = ev.load_group(vuln, "regression")
-                if not cases:
-                    print(f"[skill] {vuln} 没有 regression case，无法 eval 判分")
-                    continue
-                current = vpath.read_text(encoding="utf-8")
-                gen = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"],
-                                "你是 HackMate 的 skill 改进器，只输出改进后的完整 skill 内容（markdown），不要任何解释或代码块标记。")
-                prompt = (f"当前 {vuln}/{variant} 的 skill 内容：\n\n{current}\n\n"
-                          f"请补充/修正漏洞知识，输出改进后的完整内容。")
-                print("[skill] 正在生成候选改进...")
-                try:
-                    candidate = gen.chat(prompt)["content"]
-                except LLMError as e:
-                    print(f"[skill] 生成候选失败: {e}")
-                    continue
-                eval_fn = skill.make_skill_eval_fn(vuln, cases)
-                kept, before, after = skill.improve_skill(vuln, variant, candidate, eval_fn)
-                print(f"[skill] eval gate：改进前 {before:.0%} → 改进后 {after:.0%}")
-                print("[skill] ✓ 分数未跌，候选已保留" if kept else "[skill] ✗ 分数下跌，已自动回滚")
-                continue
-            if len(parts) == 1:
-                vulns = skill.list_vulns()
-                print(skill.summary() if vulns else "[skill] 还没有任何漏洞知识（skills/ 为空）")
-                continue
-            vuln = parts[1]
-            content = skill.load_skill(vuln)
-            if not content:
-                print(f"[skill] 没有 {vuln} 的知识")
-                continue
-            print(f"[skill] 已加载 {vuln} 知识（{len(content)} 字符），注入上下文")
-            client.messages.append({"role": "user", "content": f"[skill/{vuln}] 漏洞知识：\n{content}"})
+        # --- /skill 命令：列出漏洞知识 ---
+        if line == "/skill":
+            vulns = skill.list_vulns()
+            print(skill.summary() if vulns else "[skill] 还没有任何漏洞知识（skills/ 为空）")
             continue
 
-        # --- /memory 命令：三层记忆读写 ---
-        if line == "/memory" or line.startswith("/memory "):
-            if line == "/memory":
-                long_mem = memory.load_long_memory() or "(空)"
-                proj = memory.load_project() or "(空)"
-                print("=== 长记忆（永久）===\n" + long_mem)
-                print("\n=== 当前项目（中记忆）===\n" + proj)
-                continue
-            _, _, rest = line.partition(" ")
-            if rest.startswith("pref "):
-                memory.add_preference(rest[5:])
-                print("已记入长记忆偏好。")
-            elif rest.startswith("project "):
-                memory.save_project(rest[8:])
-                print("已写入当前项目状态。")
-            elif rest == "reset-project":
-                memory.reset_project()
-                print("中记忆已清空（切换新项目）。")
-            else:
-                print("用法：/memory pref <text> | /memory project <text> | /memory reset-project")
+        # --- /memory 命令：查看记忆 ---
+        if line == "/memory":
+            prefs = memory.load_preferences() or "(空)"
+            proj = memory.load_project() or "(空)"
+            print("=== 用户偏好（长记忆）===\n" + prefs)
+            print("\n=== 当前项目（中记忆）===\n" + proj)
             continue
 
         # --- /cdp 命令：手动查看 Chrome 页面 ---
@@ -312,7 +307,7 @@ def main():
             parts = line.split()
             cmd = parts[1] if len(parts) > 1 else "list"
 
-            if cmd in ("read", "html"):
+            if cmd == "read":
                 idx = int(parts[2]) if len(parts) > 2 else 0
                 tabs = cdp.list_tabs()
                 if not tabs:
@@ -323,13 +318,12 @@ def main():
                     continue
                 tab = tabs[idx]
                 try:
-                    content = cdp.read_page_text(tab) if cmd == "read" else cdp.read_page_html(tab)
+                    content = cdp.read_page_text(tab)
                 except CDPError as e:
                     print(f"[cdp] {e}")
                     continue
-                label = "可见文本" if cmd == "read" else "DOM HTML"
-                print(f"\n=== [{tab['title']}] {label}（{len(content)} 字符，显示前 3000）===\n{content[:3000]}\n")
-                client.messages.append({"role": "user", "content": f"[工具/Chrome] 页面「{tab['title']}」的{label}：\n{content[:4000]}"})
+                print(f"\n=== [{tab['title']}] 可见文本（{len(content)} 字符，显示前 3000）===\n{content[:3000]}\n")
+                client.messages.append({"role": "user", "content": f"[工具/Chrome] 页面「{tab['title']}」的可见文本：\n{content[:4000]}"})
                 continue
 
             tabs = cdp.list_tabs()

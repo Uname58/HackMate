@@ -1,0 +1,31 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "load_skill",
+      "description": "读某类漏洞（vuln）的完整知识（测试方法/绕过手法/坑），用于注入上下文",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "vuln": {"type": "string", "description": "漏洞大类，如 xss / sqli / cmdi"}
+        },
+        "required": ["vuln"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "improve_skill",
+      "description": "改进某个漏洞 skill 文件，经 eval gate 判分（分数涨保留 / 跌回滚）",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "vuln": {"type": "string", "description": "漏洞大类，如 xss"},
+          "variant": {"type": "string", "description": "类型，如 reflection_xss / dom_xss / stored_xss"}
+        },
+        "required": ["vuln", "variant"]
+      }
+    }
+  }
+]
