@@ -1,0 +1,3 @@
+[
+  {"id": "smoke-L1", "input": "反射点落在文本节点，无过滤", "expected": "<script>alert(1)</script>", "grader": "contains"}
+]

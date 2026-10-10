@@ -168,8 +168,15 @@ class CDPClient:
     def verify_xss(self, url, index=0, wait=4):
         """黑盒 XSS 验证：导航到带 payload 的 URL，检测 alert 弹窗是否触发。
 
-        返回 {"xss": bool, "dialog": str}。alert 触发（javascriptDialogOpening）即说明
-        payload 的 JS 真的执行了 → XSS 成立。
+        返回结构化三态结果（json 字符串）：
+        - status: CONFIRMED / INCONCLUSIVE / NOT_CONFIRMED
+        - evidence: 实际观察到的证据
+        - reason: 判定理由
+        - scope: 本次验证覆盖的输入 / 上下文 / 执行路径
+
+        当前黑盒路径只产出 CONFIRMED（alert 触发）和 INCONCLUSIVE（未触发）。
+        NOT_CONFIRMED 需读响应源码判断转义，第一周不实现，语义预留。
+        alert 触发（javascriptDialogOpening）即说明 payload 的 JS 真的执行了。
         """
         if not _HAS_WS:
             raise CDPError("缺少 websocket-client")
@@ -202,7 +209,21 @@ class CDPClient:
                     ws.send(json.dumps({"id": 99, "method": "Page.handleJavaScriptDialog",
                                         "params": {"accept": True}}))
                     break
-            return json.dumps({"xss": dialog is not None, "dialog": dialog or ""}, ensure_ascii=False)
+            if dialog is not None:
+                result = {
+                    "status": "CONFIRMED",
+                    "evidence": f"观察到 Page.javascriptDialogOpening，dialog 消息: {dialog}",
+                    "reason": "alert 弹窗触发，说明注入的 JS 在该执行路径上真的执行了",
+                    "scope": f"URL: {url}",
+                }
+            else:
+                result = {
+                    "status": "INCONCLUSIVE",
+                    "evidence": "导航完成，wait 窗口内未观察到 javascriptDialogOpening",
+                    "reason": "alert 未触发不能排除 XSS：可能 CSP 拦截 / 上下文不符 / payload 不合适 / 事件未触发",
+                    "scope": f"URL: {url}（黑盒验证，未读响应源码，故不判 NOT_CONFIRMED）",
+                }
+            return json.dumps(result, ensure_ascii=False)
         finally:
             ws.close()
 

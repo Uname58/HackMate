@@ -1,49 +1,53 @@
 # HackMate
 
-AI 渗透情报副驾驶。第一阶段：与 LLM 对话的最小 CLI。
+AI 渗透情报副驾驶。三支柱闭环：**memory（记了什么）· skill（懂什么）· tool（会用什么）**。
+
+## 目录结构
+
+```
+HackMate/
+├── chat.py                # 入口：python chat.py
+├── hackmate/              # 核心包（纯标准库 + websocket-client）
+│   ├── config.py          # 配置：环境变量 > .env > config.json > 默认
+│   ├── llm.py             # OpenAI 兼容客户端（function calling）
+│   ├── cli.py             # 对话循环 + 三支柱闭环 + 命令
+│   ├── cdp.py             # CDP 浏览器工具实现
+│   ├── memory.py          # 三层记忆（长/中/短）
+│   ├── skill.py           # skill 加载/生成/改进（含 eval gate）
+│   └── eval.py            # eval 裁判（case → grader → 分）
+├── memorys/               # 三层记忆数据（见 memorys/README.md）
+├── skills/                # 漏洞知识（见 skills/README.md）
+├── tools/                 # 执行工具（schema.json 给 LLM + how2use.md 给人）
+├── evals/                 # eval 测试集（输入→期望）
+└── cdp_tools/             # Windows 侧 CDP launcher
+```
 
 ## 运行
 
-直接启动，**首次运行会引导你粘贴 API key 并自动写入 `.env`**（跨平台，不用记命令）：
+首次运行会引导粘贴 API key 并自动写入 `.env`：
 
 ```bash
 python chat.py
 ```
 
-或手动配置 `.env`：
-
-```bash
-# Linux / macOS
-cp .env.example .env          # 然后编辑填入 key
-
-# Windows PowerShell
-Copy-Item .env.example .env   # 然后 notepad .env 填入 key
-# 或临时环境变量（当前会话）：
-$env:HACKMATE_API_KEY = "sk-xxx"
-```
-
-## 配置优先级
-
-环境变量 > `.env` > `config.json` > 默认值。
-
-| 项 | 环境变量 / .env 变量名 | 默认值 |
-|---|---|---|
-| api_key | `HACKMATE_API_KEY`（也认 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`） | 空 |
-| base_url | `HACKMATE_BASE_URL` | `https://api.deepseek.com/v1` |
-| model | `HACKMATE_MODEL` | `deepseek-chat` |
-| system_prompt | `HACKMATE_SYSTEM_PROMPT` | pentest copilot |
-
-> `.env` 文件在项目根目录或 `~/.hackmate/.env` 均可。真实环境变量优先于 `.env`（不会被覆盖）。
+或手动配置 `.env`（复制 `.env.example` 填 `HACKMATE_API_KEY`）。
 
 ## 对话命令
 
-- `/help` 帮助
-- `/clear` 清空上下文
-- `/exit` 退出
+| 命令 | 作用 |
+|---|---|
+| `/help` | 帮助 |
+| `/clear` | 清空上下文（短记忆） |
+| `/cdp` `/cdp read N` `/cdp html N` | 查看 Chrome 页面 |
+| `/skill` `/skill xss` | 查看 / 注入漏洞知识 |
+| `/memory` | 查看长记忆 + 项目状态 |
+| `/memory pref <text>` | 追加偏好（长记忆） |
+| `/memory project <text>` | 写当前项目（中记忆） |
+| `/memory reset-project` | 切项目：清空中记忆 |
 
 ## 设计原则
 
-- **纯标准库**（urllib + json + readline），零第三方依赖，换机即跑。
+- **纯标准库**（urllib + json），唯一第三方依赖 `websocket-client`（读 DOM 用）。
 - **OpenAI 兼容接口**，deepseek / openai / ollama / vllm 通用。
-- **`.env` 自解析**（不用 python-dotenv），敏感信息不落仓库（见 `.gitignore`）。
-- 目录结构为后续扩展预留：`browser/`（浏览器抽象）、`brain/`（决策）、`memory/`（记忆分层）。
+- **记忆三层仿 Hermes**：长（永久）/ 中（项目级）/ 短（对话级）。
+- **skill 改进必过 eval gate**：分数涨保留、跌回滚，防黑箱盲改。

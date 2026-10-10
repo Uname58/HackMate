@@ -1,0 +1,9 @@
+[
+  {"id": "xss-labs-L1", "input": "反射点落在文本节点，无任何过滤", "expected": "<script>alert(1)</script>", "grader": "contains"},
+  {"id": "xss-labs-L2", "input": "反射点落在 <h2> 文本节点，htmlspecialchars 转义了 < >", "expected": "\"><script>alert(1)</script>", "grader": "contains"},
+  {"id": "xss-labs-L3", "input": "反射点落在属性值 value=\"...\" 内，htmlspecialchars 但没加 ENT_QUOTES（单引号未转义）", "expected": "' onclick='alert(1)", "grader": "contains"},
+  {"id": "xss-labs-L4", "input": "反射点落在属性值内，过滤了 < >", "expected": "\" onclick=\"alert(1)", "grader": "contains"},
+  {"id": "xss-labs-L5", "input": "反射点落在属性值内，过滤 on 和 <script 关键字", "expected": "javascript:alert(1)", "grader": "contains"},
+  {"id": "xss-labs-L6", "input": "反射点落在属性值内，大小写敏感地过滤 on/<script", "expected": "javascript:alert(1)", "grader": "contains"},
+  {"id": "xss-labs-L7", "input": "过滤 script 关键字（只删一次）", "expected": "scrscriptipt", "grader": "contains"}
+]

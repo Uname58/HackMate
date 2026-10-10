@@ -1,15 +1,25 @@
-"""HackMate CLI —— 与 LLM 对话的最小入口（支持 function calling 调用 CDP 工具）。
+"""HackMate CLI —— AI 渗透副驾驶，三支柱闭环（memory / skill / tool）。
 
 启动：python chat.py（在 HackMate 根目录）
 """
 
 import sys
 import json
+from pathlib import Path
 
 from .config import load_config
 from .llm import LLMClient, LLMError
+from . import memory, skill
 
-BANNER = "HackMate v0.1 — AI 渗透情报副驾驶 (CLI)"
+BASE_DIR = Path(__file__).resolve().parent.parent  # HackMate 根目录
+TOOLS_DIR = BASE_DIR / "tools"
+
+# 工具权限分类 —— 权限边界在工具执行层强制（不靠 prompt）
+READ_ONLY_TOOLS = {"list_tabs", "read_page_text", "find_xss_entries"}
+CONTROLLED_TOOLS = {"navigate", "open_new_tab", "fill_form", "click", "verify_xss"}
+HIGH_RISK_TOOLS = set()  # 第一周留空（改变业务数据 / 越权 / 破坏性操作）
+
+BANNER = "HackMate v0.2 — AI 渗透情报副驾驶 (CLI)"
 
 HELP = """命令:
   /help        显示本帮助
@@ -17,122 +27,92 @@ HELP = """命令:
   /cdp         查看当前 Chrome 打开的页面（带序号，注入上下文）
   /cdp read N  读第 N 个页面的可见文本
   /cdp html N  读第 N 个页面的 DOM HTML
+  /skill       列出可用的漏洞知识（skills/）
+  /skill <vuln>  把某类漏洞知识注入上下文（如 /skill xss）
+  /memory      查看长记忆 + 当前项目状态
+  /memory pref <text>   追加一条偏好到长记忆
+  /memory project <text>  写当前项目状态（中记忆）
+  /memory reset-project   切换项目：清空中记忆
   /exit        退出（也可用 exit / quit / Ctrl+C）
   其它任意输入都会发给 LLM 对话（LLM 可自动调用浏览器工具）
 """
 
-# LLM 可调用的浏览器工具（function calling schema）
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "list_tabs",
-            "description": "列出 Chrome 当前打开的所有页面（标题和 URL）",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_new_tab",
-            "description": "在 Chrome 里开一个新标签页并导航到指定 URL（空白页用 about:blank）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "要打开的 URL，默认 about:blank"}
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_page_text",
-            "description": "读第 index 个页面的可见文本内容",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "index": {"type": "integer", "description": "页面序号，从 0 开始"}
-                },
-                "required": ["index"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "navigate",
-            "description": "导航第 index 个页面到指定 URL",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "目标 URL"},
-                    "index": {"type": "integer", "description": "页面序号，默认 0"},
-                },
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "fill_form",
-            "description": "在第 index 个页面填表单字段（CSS selector + 值，React/Vue 兼容）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "selector": {"type": "string", "description": "CSS selector，如 #username"},
-                    "value": {"type": "string", "description": "要填的值"},
-                    "index": {"type": "integer", "description": "页面序号，默认 0"},
-                },
-                "required": ["selector", "value"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "click",
-            "description": "点击第 index 个页面上的元素（CSS selector）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "selector": {"type": "string", "description": "CSS selector"},
-                    "index": {"type": "integer", "description": "页面序号，默认 0"},
-                },
-                "required": ["selector"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "find_xss_entries",
-            "description": "扫描第 index 个页面的 XSS 注入点候选（输入框、表单、URL 参数、带参数的链接）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "index": {"type": "integer", "description": "页面序号，默认 0"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "verify_xss",
-            "description": "黑盒验证 XSS：导航到带 payload 的完整 URL，检测 alert 弹窗是否触发（触发=JS 执行=XSS 成立）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "带 XSS payload 的完整 URL"},
-                    "index": {"type": "integer", "description": "页面序号，默认 0"},
-                },
-                "required": ["url"],
-            },
-        },
-    },
-]
+
+def load_tools():
+    """从 tools/*/schema.json 加载 function calling 工具定义（给 LLM 的接口声明）。"""
+    tools = []
+    if not TOOLS_DIR.exists():
+        return tools
+    for schema_file in sorted(TOOLS_DIR.glob("*/schema.json")):
+        try:
+            data = json.loads(schema_file.read_text(encoding="utf-8"))
+            tools.extend(data if isinstance(data, list) else [data])
+        except Exception as e:
+            print(f"[warn] 加载工具 schema {schema_file} 失败: {e}")
+    return tools
+
+
+def _host_from_url(url):
+    """从 URL 提取 hostname（不带端口）。空 / 非法 URL 返回 ''。"""
+    from urllib.parse import urlparse
+    try:
+        return urlparse(url).hostname or ""
+    except Exception:
+        return ""
+
+
+def _authorized(host, allowed_hosts):
+    """检查 host 是否在授权白名单。空白名单 = 未授权任何目标。"""
+    if not host or not allowed_hosts:
+        return False
+    return host in allowed_hosts or any(host.endswith("." + h) for h in allowed_hosts if h)
+
+
+def _target_host(name, args, cdp):
+    """从工具参数提取目标 host（用于授权检查）。"""
+    if name in ("navigate", "open_new_tab", "verify_xss"):
+        return _host_from_url(args.get("url", ""))
+    if name in ("fill_form", "click"):
+        idx = int(args.get("index", 0))
+        try:
+            tabs = cdp.list_tabs()
+            if 0 <= idx < len(tabs):
+                return _host_from_url(tabs[idx]["url"])
+        except Exception:
+            pass
+        return ""
+    return ""
+
+
+def _check_authorized(name, args, cdp, allowed_hosts):
+    """权限检查。返回 None=放行，返回字符串=拦截原因。"""
+    if name not in CONTROLLED_TOOLS and name not in HIGH_RISK_TOOLS:
+        return None  # 只读工具，放行
+    if name in ("navigate", "open_new_tab", "verify_xss"):
+        url = (args.get("url") or "").strip()
+        if url.lower() == "about:blank" or url == "":
+            return None  # 空白页，无目标，放行
+        host = _host_from_url(url)
+    else:  # fill_form / click：作用在当前 tab
+        host = _target_host(name, args, cdp)
+    if not _authorized(host, allowed_hosts):
+        return (f"权限拦截：目标 {host or '（无法解析的 URL，如 javascript:/data:）'} 不在授权白名单。"
+                f"当前授权：{allowed_hosts or '无'}。需人工授权后才能执行。")
+    return None
+
+
+def build_system_prompt(cfg):
+    """闭环起点：长记忆（system prompt + 偏好）+ skill 目录摘要 拼成 system prompt。"""
+    parts = []
+    sp = memory.load_system_prompt()
+    parts.append(sp if sp else cfg["system_prompt"])
+    prefs = memory.load_preferences()
+    if prefs:
+        parts.append("## 用户偏好\n" + prefs)
+    sk = skill.summary()
+    if sk:
+        parts.append(sk + "\n（用 /skill <vuln> 查看某类漏洞的完整知识）")
+    return "\n\n".join(parts)
 
 
 def main():
@@ -144,7 +124,6 @@ def main():
         if not key:
             print("未输入 key，退出。")
             return 1
-        from pathlib import Path
         env_path = Path(".env")
         if env_path.exists():
             print(f"{env_path} 已存在，请手动编辑填入 key（格式 HACKMATE_API_KEY=sk-xxx）。")
@@ -156,10 +135,15 @@ def main():
             print("配置加载失败，请检查 .env 内容。")
             return 1
 
-    client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], cfg["system_prompt"])
+    system_prompt = build_system_prompt(cfg)
+    client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], system_prompt)
+
+    tools = load_tools()
+    allowed_hosts = cfg.get("allowed_hosts", [])
 
     print(BANNER)
     print(f"模型: {cfg['model']}  |  端点: {cfg['base_url']}")
+    print(f"已加载 {len(tools)} 个浏览器工具 | 可用漏洞知识: {', '.join(skill.list_vulns()) or '无'}")
     print("输入 /help 查看命令，直接输入文字开始对话。\n")
 
     try:
@@ -181,6 +165,12 @@ def main():
         cdp = ensure_cdp_client()
         if cdp is None:
             return "错误：CDP 未就绪，无法执行浏览器操作"
+
+        # 权限边界：受控/高风险操作先过授权检查（模型请求 ≠ 操作获准）
+        deny = _check_authorized(name, args, cdp, allowed_hosts)
+        if deny:
+            print(f"  [权限] {deny}")
+            return deny
         try:
             if name == "list_tabs":
                 tabs = cdp.list_tabs()
@@ -233,6 +223,46 @@ def main():
         if line in ("/help", "help"):
             print(HELP)
             continue
+
+        # --- /skill 命令：查看/注入漏洞知识 ---
+        if line == "/skill" or line.startswith("/skill "):
+            parts = line.split()
+            if len(parts) == 1:
+                vulns = skill.list_vulns()
+                print(skill.summary() if vulns else "[skill] 还没有任何漏洞知识（skills/ 为空）")
+                continue
+            vuln = parts[1]
+            content = skill.load_skill(vuln)
+            if not content:
+                print(f"[skill] 没有 {vuln} 的知识")
+                continue
+            print(f"[skill] 已加载 {vuln} 知识（{len(content)} 字符），注入上下文")
+            client.messages.append({"role": "user", "content": f"[skill/{vuln}] 漏洞知识：\n{content}"})
+            continue
+
+        # --- /memory 命令：三层记忆读写 ---
+        if line == "/memory" or line.startswith("/memory "):
+            if line == "/memory":
+                long_mem = memory.load_long_memory() or "(空)"
+                proj = memory.load_project() or "(空)"
+                print("=== 长记忆（永久）===\n" + long_mem)
+                print("\n=== 当前项目（中记忆）===\n" + proj)
+                continue
+            _, _, rest = line.partition(" ")
+            if rest.startswith("pref "):
+                memory.add_preference(rest[5:])
+                print("已记入长记忆偏好。")
+            elif rest.startswith("project "):
+                memory.save_project(rest[8:])
+                print("已写入当前项目状态。")
+            elif rest == "reset-project":
+                memory.reset_project()
+                print("中记忆已清空（切换新项目）。")
+            else:
+                print("用法：/memory pref <text> | /memory project <text> | /memory reset-project")
+            continue
+
+        # --- /cdp 命令：手动查看 Chrome 页面 ---
         if line.startswith("/cdp"):
             from .cdp import CDPError
             cdp = ensure_cdp_client()
@@ -275,9 +305,9 @@ def main():
             client.messages.append({"role": "user", "content": f"[工具/Chrome] {summary}"})
             continue
 
-        # 正常对话 + function calling tool loop
+        # --- 正常对话 + function calling tool loop ---
         try:
-            resp = client.chat(line, tools=TOOLS)
+            resp = client.chat(line, tools=tools)
         except LLMError as e:
             print(f"[错误] {e}")
             continue
@@ -294,7 +324,7 @@ def main():
                 result = execute_tool(fn, args)
                 results.append((tc["id"], fn, result))
             try:
-                resp = client.submit_tool_results(results, tools=TOOLS)
+                resp = client.submit_tool_results(results, tools=tools)
             except LLMError as e:
                 print(f"[错误] {e}")
                 resp = {"type": "text", "content": ""}
