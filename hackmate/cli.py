@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import load_config, app_root
 from .llm import LLMClient, LLMError
-from . import memory, skill
+from . import memory, skill, log
 
 BASE_DIR = app_root()  # HackMate 根目录
 TOOLS_DIR = BASE_DIR / "tools"
@@ -25,10 +25,13 @@ def _yellow(text):
 HELP = """命令:
   /help        显示本帮助
   /clear       清空上下文（保留 system prompt）
+  /stop        停止当前任务（清空上下文，回到干净对话）
   /cdp         查看当前 Chrome 打开的页面（带序号，注入上下文）
   /cdp read N  读第 N 个页面的可见文本
   /skill       列出可用的漏洞知识（skills/）
   /memory      查看长记忆 + 当前项目状态
+  /log         查看最近 10 条关键结果（skill 发现/改进、漏洞确认、沉淀 case）
+  /log steps   查看最近 20 条关键步骤（过程流水账）
   /exit        退出（也可用 exit / quit / Ctrl+C）
   其它任意输入都会发给 LLM 对话（LLM 可自动调用浏览器/skill 工具）
 """
@@ -59,6 +62,9 @@ def build_system_prompt(cfg):
     proj = memory.load_project()
     if proj:
         parts.append("## 当前项目状态（中记忆，重启后保留）\n" + proj)
+    steps = log.format_steps(20)
+    if steps and "没有任何" not in steps:
+        parts.append("## 最近步骤日志（最新进展，优先于上面的中记忆）\n" + steps)
     sk = skill.summary()
     if sk:
         parts.append(sk + "\n（用 /skill <vuln> 查看某类漏洞的完整知识）")
@@ -105,6 +111,12 @@ def cmd_memory():
     return 0
 
 
+def cmd_log():
+    """查看最近关键事件。"""
+    print(log.format_recent(10))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="hackmate", description="HackMate — AI 渗透情报副驾驶")
     sub = parser.add_subparsers(dest="cmd")
@@ -114,6 +126,7 @@ def main(argv=None):
     p_cdp.add_argument("action", nargs="?", choices=["read"], help="read 读第 index 页")
     p_cdp.add_argument("index", nargs="?", type=int, default=0, help="页面序号")
     sub.add_parser("memory", help="查看长记忆 + 当前项目")
+    sub.add_parser("log", help="查看最近关键事件")
     args = parser.parse_args(argv)
 
     if args.cmd == "skill":
@@ -122,6 +135,8 @@ def main(argv=None):
         return cmd_cdp(args)
     if args.cmd == "memory":
         return cmd_memory()
+    if args.cmd == "log":
+        return cmd_log()
     return chat_loop()
 
 
@@ -192,7 +207,9 @@ def chat_loop():
                 "grader": "contains",
                 "keyword": args.get("keyword", ""),
             }
-            return ev.append_case(vuln, "hidden", case)
+            result = ev.append_case(vuln, "hidden", case)
+            log.record("case", vuln=vuln, input=case["input"], expected=case["expected"])
+            return result
         if name == "load_skill":
             content = skill.load_skill(args.get("vuln", ""))
             return content if content else "没有该漏洞的知识"
@@ -206,8 +223,13 @@ def chat_loop():
             if not cases:
                 return f"{vuln} 没有 regression case，无法 eval 判分"
             current = vpath.read_text(encoding="utf-8") if vpath.exists() else ""
-            gen = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"],
-                            "你是 HackMate 的 skill 改进器，只输出改进后的完整 skill 内容（markdown），不要任何解释或代码块标记。")
+            gen = LLMClient(cfg["base_url"], cfg["api_key"], cfg.get("skill_model", "deepseek-v4-pro"),
+                            "你是 HackMate 的 skill 改进器。skill 是给渗透测试副驾驶用的「可操作知识」，不是教科书。"
+                            "硬性要求：只写可操作的测试方法 / 绕过手法 / payload 模板 / 踩过的坑；"
+                            "不写定义（XSS 是什么）、影响（Impact）、防御建议（Defense/CSP/HttpOnly）、工具清单、参考链接；"
+                            "每个 section 必须「能直接拿去用」，否则删掉；保持精简，宁短勿长。"
+                            "只输出改进后的完整 skill 内容（markdown），不要任何解释或代码块标记。",
+                            timeout=120)
             prompt = (f"当前 {vuln}/{variant} 的 skill 内容：\n\n{current}\n\n"
                       f"请补充/修正漏洞知识，输出改进后的完整内容。")
             try:
@@ -218,12 +240,16 @@ def chat_loop():
             print(_yellow(f"eval gate 判分中（{len(cases)} case × 2 轮，约 {len(cases)*2*2} 次 LLM 调用，稍等）..."))
             eval_client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], "")
             eval_fn = skill.make_skill_eval_fn(vuln, cases, eval_client)
-            kept, before, after = skill.improve_skill(vuln, variant, candidate, eval_fn)
+            try:
+                kept, before, after = skill.improve_skill(vuln, variant, candidate, eval_fn)
+            except LLMError as e:
+                return f"eval 中止：{e}（skill 未改动）"
             if kept:
                 if is_new:
                     print(_yellow(f'hackmate>！！！发现skill "{variant}"'))
                 else:
                     print(_yellow(f'hackmate>！！！改进skill "{variant}"'))
+                log.record("skill", action="发现" if is_new else "改进", vuln=vuln, variant=variant)
             return f"eval gate：改进前 {before:.0%} → 改进后 {after:.0%}，" + ("已保留" if kept else "已回滚")
         cdp = ensure_cdp_client()
         if cdp is None:
@@ -246,7 +272,8 @@ def chat_loop():
                 idx = int(args.get("index", 0))
                 if not (0 <= idx < len(tabs)):
                     return f"序号 {idx} 超出范围（0-{len(tabs)-1}）"
-                return cdp.read_page_text(tabs[idx])
+                text = cdp.read_page_text(tabs[idx])
+                return text[:2000] if len(text) > 2000 else text
             if name == "navigate":
                 return cdp.navigate(args.get("url", "about:blank"), int(args.get("index", 0)))
             if name == "fill_form":
@@ -256,7 +283,13 @@ def chat_loop():
             if name == "find_xss_entries":
                 return cdp.find_xss_entries(int(args.get("index", 0)))
             if name == "verify_xss":
-                return cdp.verify_xss(args["url"], int(args.get("index", 0)))
+                result = cdp.verify_xss(args["url"], int(args.get("index", 0)))
+                try:
+                    if json.loads(result).get("status") == "CONFIRMED":
+                        log.record("vuln", url=args["url"], params=log.extract_params(args["url"]))
+                except (json.JSONDecodeError, AttributeError, TypeError):
+                    pass
+                return result
         except Exception as e:
             return f"工具执行错误: {e}"
         return f"未知工具: {name}"
@@ -277,6 +310,10 @@ def chat_loop():
             client.clear()
             print("上下文已清空。")
             continue
+        if line in ("/stop", "stop"):
+            client.clear()
+            print("[stop] 已停止当前任务，上下文已清空（任务执行中请用 Ctrl+C 中断）")
+            continue
         if line in ("/help", "help"):
             print(HELP)
             continue
@@ -293,6 +330,14 @@ def chat_loop():
             proj = memory.load_project() or "(空)"
             print("=== 用户偏好（长记忆）===\n" + prefs)
             print("\n=== 当前项目（中记忆）===\n" + proj)
+            continue
+
+        # --- /log 命令：查看最近关键事件 ---
+        if line == "/log":
+            print(log.format_recent(10))
+            continue
+        if line == "/log steps":
+            print(log.format_steps(20))
             continue
 
         # --- /cdp 命令：手动查看 Chrome 页面 ---
@@ -342,25 +387,32 @@ def chat_loop():
             resp = client.chat(line, tools=tools)
         except LLMError as e:
             print(f"[错误] {e}")
+            print("[提示] 上一步请求失败，上下文已保留——可直接重试（重新输入）或 /clear 重来")
             continue
 
-        while resp.get("type") == "tool_calls":
-            results = []
-            for tc in resp["tool_calls"]:
-                fn = tc["function"]["name"]
+        try:
+            while resp.get("type") == "tool_calls":
+                results = []
+                for tc in resp["tool_calls"]:
+                    fn = tc["function"]["name"]
+                    try:
+                        args = json.loads(tc["function"].get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    print(f"  [tool] {fn}({json.dumps(args, ensure_ascii=False)})")
+                    result = execute_tool(fn, args)
+                    log.record_step(fn, args, result)
+                    results.append((tc["id"], fn, result))
                 try:
-                    args = json.loads(tc["function"].get("arguments") or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                print(f"  [tool] {fn}({json.dumps(args, ensure_ascii=False)})")
-                result = execute_tool(fn, args)
-                results.append((tc["id"], fn, result))
-            try:
-                resp = client.submit_tool_results(results, tools=tools)
-            except LLMError as e:
-                print(f"[错误] {e}")
-                resp = {"type": "text", "content": ""}
-                break
+                    resp = client.submit_tool_results(results, tools=tools)
+                    client.compact()
+                except LLMError as e:
+                    print(f"[错误] {e}")
+                    resp = {"type": "text", "content": ""}
+                    break
+        except KeyboardInterrupt:
+            print("\n[已停止] 当前任务已中断，回到对话（上下文保留）")
+            continue
 
         if resp.get("type") == "text":
             print(f"\nHackMate> {resp['content']}\n")

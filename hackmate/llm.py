@@ -4,6 +4,8 @@
 """
 
 import json
+import threading
+import time
 import urllib.request
 import urllib.error
 
@@ -12,8 +14,12 @@ class LLMError(Exception):
     """LLM 调用失败时抛出。"""
 
 
+class _RetryableError(LLMError):
+    """可重试的网络错误（超时 / 连接失败 / 网络异常）。"""
+
+
 class LLMClient:
-    def __init__(self, base_url, api_key, model, system_prompt="", timeout=120):
+    def __init__(self, base_url, api_key, model, system_prompt="", timeout=45):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -37,6 +43,30 @@ class LLMClient:
             },
             method="POST",
         )
+        for attempt in range(3):
+            result = {}
+
+            def _do():
+                try:
+                    result["data"] = self._do_request_once(req)
+                except Exception as e:
+                    result["err"] = e
+
+            t = threading.Thread(target=_do, daemon=True)
+            t.start()
+            t.join(timeout=self.timeout)
+            if t.is_alive():
+                result["err"] = _RetryableError(f"请求总超时（>{self.timeout} 秒）")
+            err = result.get("err")
+            if err is None:
+                return result["data"]
+            if isinstance(err, _RetryableError) and attempt < 2:
+                time.sleep(attempt + 1)  # 1s、2s 退避后重试
+                continue
+            raise err
+
+    def _do_request_once(self, req):
+        """单次网络请求 + 解析（无重试，异常按「是否可重试」分类）。"""
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -44,8 +74,13 @@ class LLMClient:
             detail = e.read().decode("utf-8", "replace")
             raise LLMError(f"HTTP {e.code}: {detail[:500]}")
         except urllib.error.URLError as e:
-            raise LLMError(f"网络错误: {e.reason}")
-
+            raise _RetryableError(f"网络错误: {e.reason}")
+        except TimeoutError:
+            raise _RetryableError(f"请求超时（>{self.timeout} 秒）")
+        except json.JSONDecodeError:
+            raise LLMError("响应不是合法 JSON")
+        except OSError as e:
+            raise _RetryableError(f"网络异常: {e}")
         try:
             return data["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
@@ -96,3 +131,17 @@ class LLMClient:
         self.messages = []
         if self.system_prompt:
             self.messages.append({"role": "system", "content": self.system_prompt})
+
+    def compact(self, keep_turns=20):
+        """压缩上下文：保留 system + 最近 keep_turns 个 user 轮次，删更旧的完整轮次。
+
+        按「user 消息」切轮次（一个 user 触发的一组 tool_calls/tool 结果算一轮），
+        删整轮不会破坏 OpenAI tool_calls 的成对结构。返回是否发生了压缩。
+        """
+        user_idx = [i for i, m in enumerate(self.messages) if m.get("role") == "user"]
+        if len(user_idx) <= keep_turns:
+            return False
+        first_keep = user_idx[-keep_turns]
+        head = [m for m in self.messages[:first_keep] if m.get("role") == "system"]
+        self.messages = head + self.messages[first_keep:]
+        return True

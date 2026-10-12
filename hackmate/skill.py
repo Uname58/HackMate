@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from .config import app_root
+from .llm import LLMError
 
 BASE_DIR = app_root()  # HackMate 根目录
 SKILLS_DIR = BASE_DIR / "skills"
@@ -112,6 +113,7 @@ def make_skill_eval_fn(vuln: str, cases: list, llm_client=None, trials: int = 2)
             if not cases:
                 return 0.0
             passed = total = 0
+            consecutive_failures = 0
             for i, c in enumerate(cases, 1):
                 for _ in range(trials):
                     llm_client.clear()
@@ -124,13 +126,17 @@ def make_skill_eval_fn(vuln: str, cases: list, llm_client=None, trials: int = 2)
                     try:
                         payload = llm_client.chat(prompt)["content"].strip()
                         ok = grade_case(c, payload)
+                        consecutive_failures = 0
                     except Exception as e:
                         payload = f"<error: {e}>"
                         ok = False
+                        consecutive_failures += 1
                     total += 1
                     if ok:
                         passed += 1
                     record_transcript(vuln, c, payload, ok)
+                    if consecutive_failures >= 3:
+                        raise LLMError(f"LLM 连续 {consecutive_failures} 次调用失败，eval 中止")
                 print(f"  [eval] {i}/{len(cases)} {c.get('id', '?')} 判分完成")
             return passed / total if total else 0.0
 
@@ -159,7 +165,11 @@ def improve_skill(vuln: str, variant: str, new_content: str, eval_fn):
     """
     before = eval_fn()
     write_skill(vuln, variant, new_content, backup=True)
-    after = eval_fn()
+    try:
+        after = eval_fn()
+    except Exception:
+        rollback_skill(vuln, variant)
+        raise
     if after < before:
         rollback_skill(vuln, variant)
         return False, before, after

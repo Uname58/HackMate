@@ -18,6 +18,7 @@ DEFAULTS = {
     "api_key": "",
     "base_url": "https://api.deepseek.com/v1",
     "model": "deepseek-chat",
+    "skill_model": "deepseek-v4-pro",
     "system_prompt": "You are a pentest copilot. Be concise, technical, and honest.",
     "cdp_host": "localhost",
     "cdp_port": 9222,
@@ -79,7 +80,7 @@ def load_config():
             except Exception as e:
                 print(f"[warn] 读取配置 {p} 失败: {e}")
                 continue
-            for key in ("api_key", "base_url", "model", "system_prompt", "cdp_host", "cdp_port"):
+            for key in ("api_key", "base_url", "model", "skill_model", "system_prompt", "cdp_host", "cdp_port"):
                 if key in data and data[key]:
                     cfg[key] = data[key]
 
@@ -90,6 +91,7 @@ def load_config():
     for env, key in (
         ("HACKMATE_BASE_URL", "base_url"),
         ("HACKMATE_MODEL", "model"),
+        ("HACKMATE_SKILL_MODEL", "skill_model"),
         ("HACKMATE_SYSTEM_PROMPT", "system_prompt"),
         ("HACKMATE_CDP_HOST", "cdp_host"),
         ("HACKMATE_CDP_PORT", "cdp_port"),
