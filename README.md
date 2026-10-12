@@ -27,9 +27,8 @@ python chat.py memory     # 查看偏好 + 项目状态
 三支柱 + eval 裁判，构成「自主变强闭环」：
 
 - **memory**：长（偏好/设定）· 中（项目状态，LLM 自动 `save_project`）· 短（对话上下文）+ 步骤日志
-- **skill**：`skills/<vuln>/` 漏洞知识，打靶后 LLM 自动 `improve_skill` 改进（过 eval gate，涨保留 / 跌回滚）
+- **skill**：`skills/<vuln>/` 漏洞知识，打靶后 LLM 自动 `improve_skill` 改进
 - **tool**：CDP 浏览器工具 + `save_case` 沉淀 eval case
-- **eval**：思路 B——LLM 带 skill 产 payload 对 `expected` 判分，N 次取成功率；hidden 集防过拟合
 
 三个可靠性承诺：
 
@@ -37,9 +36,22 @@ python chat.py memory     # 查看偏好 + 项目状态
 - **自动记坑**：`verify_xss` CONFIRMED 即 save_case，不依赖靶场 Solved 标记
 - **自动改善 skill + eval 不回滚**：skill 改进必须过 eval gate
 
+## eval：怎么保证「改 skill」是真的变强
+
+skill 不能黑箱乱改，每次 `improve_skill` 都过 eval gate：
+
+1. **思路 B** —— LLM 带 skill 产 payload，对 `expected` 判分（不是关键词覆盖，是真测能不能打）
+2. **Trial** —— 每 case 跑 N 次取成功率，消掉 LLM 随机性
+3. **分组** —— `smoke` / `dev` / `regression` / `hidden`（跨来源 case 防过拟合）
+4. **gate** —— 改前记分 → 写新内容 → 改后记分，分数跌自动回滚（留 `.bak` 备份），涨才保留
+5. **沉淀** —— 靶场过关（`verify_xss` CONFIRMED）即 `save_case` 进 hidden 集，下次成为判分依据
+
 ## 双模型分工
 
-打靶场（快速试错）用 `deepseek-flash`；skill 候选生成（深度提炼）用 `deepseek-v4-pro`。改 `.env` 的 `HACKMATE_MODEL` / `HACKMATE_SKILL_MODEL` 切换。
+- **快模型**：打靶场主对话（快速试错，反射型 XSS 秒级出 payload）
+- **深度思考模型**：skill 候选生成（读入整份 skill，深度提炼可复用规律）
+
+两个模型走不同 `.env` 变量（`HACKMATE_MODEL` / `HACKMATE_SKILL_MODEL`），任意 OpenAI 兼容模型都能换。
 
 ## 目录
 
