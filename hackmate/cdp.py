@@ -1,0 +1,402 @@
+"""CDP 客户端 —— 读 Chrome 状态 + 页面 DOM + 黑盒验证 XSS。
+
+- HTTP 端点：列 tab、读标题/URL（零依赖）
+- WebSocket：读 DOM / 跑 JS / 监听 dialog（需 websocket-client）
+
+v2 相对 v1 基本沿用（浏览器层稳定）。
+"""
+
+import json
+import subprocess
+import time
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+from .config import app_root
+
+try:
+    import websocket  # websocket-client
+    _HAS_WS = True
+    # WS 卡死/断开/超时（WebSocketTimeoutException 等均为 WebSocketException 子类）+ socket 层错误
+    _WS_ERRORS = (websocket.WebSocketException, OSError)
+except ImportError:
+    websocket = None
+    _HAS_WS = False
+    _WS_ERRORS = (OSError,)
+
+
+class CDPError(Exception):
+    pass
+
+
+class CDPConnError(CDPError):
+    """连接类错误（HTTP 端点连不上/超时），用于卡死自愈的重启判定。"""
+    pass
+
+
+class CDPClient:
+    def __init__(self, host="localhost", port=9222, timeout=5):
+        self.host = host
+        self.port = port
+        self.base = f"http://{host}:{port}"
+        self.timeout = timeout
+
+    def _get_json(self, path):
+        url = f"{self.base}{path}"
+        try:
+            with urllib.request.urlopen(url, timeout=self.timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            raise CDPConnError(f"无法连接 CDP ({url}): {e}")
+        except Exception as e:
+            raise CDPError(f"CDP 响应异常 ({url}): {e}")
+
+    def list_tabs(self):
+        data = self._get_json("/json")
+        tabs = []
+        for t in data:
+            if t.get("type") != "page":
+                continue
+            tabs.append({
+                "id": t.get("id", ""),
+                "title": t.get("title", ""),
+                "url": t.get("url", ""),
+                "ws": t.get("webSocketDebuggerUrl", ""),
+            })
+        return tabs
+
+    def open_new_tab(self, url="about:blank"):
+        from urllib.parse import quote
+        req = urllib.request.Request(
+            f"{self.base}/json/new?{quote(url, safe=':/?&=')}", method="PUT")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            raise CDPError(f"开新标签页失败: {e}")
+
+    def _cdp_cmd(self, ws_url, method, params=None, timeout=10):
+        if not _HAS_WS:
+            raise CDPError("缺少 websocket-client，请 pip install websocket-client")
+        ws = websocket.create_connection(ws_url, timeout=timeout)
+        try:
+            ws.send(json.dumps({"id": 1, "method": method, "params": params or {}}))
+            msg = None
+            while True:
+                msg = json.loads(ws.recv())
+                if msg.get("id") == 1:
+                    break
+        finally:
+            ws.close()
+        if msg.get("error"):
+            raise CDPError(f"CDP {method} 错误: {msg['error'].get('message', '')}")
+        return msg.get("result", {})
+
+    def _cdp_eval(self, ws_url, expression, timeout=10):
+        result = self._cdp_cmd(
+            ws_url, "Runtime.evaluate",
+            {"expression": expression, "returnByValue": True}, timeout)
+        r = result.get("result", {})
+        if r.get("subtype") == "error":
+            raise CDPError(f"Runtime.evaluate 出错: {r.get('description', '')}")
+        return r.get("value", "")
+
+    def _get_tab(self, index=0):
+        tabs = self.list_tabs()
+        if not (0 <= index < len(tabs)):
+            raise CDPError(f"序号 {index} 超出范围（0-{len(tabs)-1}）")
+        return tabs[index]
+
+    def restart(self):
+        """卡死自愈：杀掉调试 Chrome → 重新拉起 → 等 CDP 就绪。返回是否恢复。"""
+        _kill_debug_chrome()
+        time.sleep(1.5)
+        launch_chrome(self.port)
+        return wait_for_cdp(self.host, self.port, timeout=25)
+
+    def _resilient(self, index, op):
+        """跑 op(tab)；WS 卡死(超时/断开)或端点连不上则重启 Chrome、重取 tab、重试一次，仍失败才抛。"""
+        try:
+            return op(self._get_tab(index))
+        except _WS_ERRORS + (CDPConnError,):
+            if not self.restart():
+                raise
+            return op(self._get_tab(index))
+
+    def navigate(self, url, index=0):
+        def op(tab):
+            self._cdp_cmd(tab["ws"], "Page.navigate", {"url": url})
+            return f"已导航到 {url}"
+        return self._resilient(index, op)
+
+    def fill_form(self, selector, value, index=0):
+        js = (
+            "(function(){"
+            f"const el=document.querySelector({json.dumps(selector)});"
+            "if(!el)return '未找到元素: '+" + json.dumps(selector) + ";"
+            "if(el.tagName==='SELECT'){"
+            f"el.value={json.dumps(value)};"
+            "el.dispatchEvent(new Event('change',{bubbles:true}));"
+            "return '已选: '+" + json.dumps(selector) + ";"
+            "}"
+            "const proto=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;"
+            f"Object.getOwnPropertyDescriptor(proto,'value').set.call(el,{json.dumps(value)});"
+            "el.dispatchEvent(new Event('input',{bubbles:true}));"
+            "el.dispatchEvent(new Event('change',{bubbles:true}));"
+            "return '已填: '+" + json.dumps(selector) + ";"
+            "})()"
+        )
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
+
+    def click(self, selector, index=0):
+        js = (
+            "(function(){"
+            f"const el=document.querySelector({json.dumps(selector)});"
+            "if(!el)return '未找到元素: '+" + json.dumps(selector) + ";"
+            "el.click();"
+            "return '已点击: '+" + json.dumps(selector) + ";"
+            "})()"
+        )
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
+
+    def find_xss_entries(self, index=0):
+        js = (
+            "(function(){"
+            "const out={url:location.href,"
+            "url_params:Array.from(new URLSearchParams(location.search).keys()),"
+            "inputs:[],textareas:[],selects:[],forms:[],links_with_params:[]};"
+            "document.querySelectorAll('input').forEach(el=>{out.inputs.push("
+            "{name:el.name||'',type:el.type||'',id:el.id||'',placeholder:el.placeholder||''})});"
+            "document.querySelectorAll('textarea').forEach(el=>{out.textareas.push("
+            "{name:el.name||'',id:el.id||'',placeholder:el.placeholder||''})});"
+            "document.querySelectorAll('select').forEach(el=>{out.selects.push("
+            "{name:el.name||'',id:el.id||''})});"
+            "document.querySelectorAll('form').forEach(el=>{out.forms.push("
+            "{action:el.action||'',method:el.method||''})});"
+            "document.querySelectorAll('a[href*=\"?\"]').forEach(el=>{out.links_with_params.push("
+            "{text:(el.innerText||'').trim().slice(0,50),href:el.getAttribute('href')})});"
+            "return JSON.stringify(out);"
+            "})()"
+        )
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
+
+    def verify_xss(self, url, index=0, wait=4):
+        """黑盒验证：导航到带 payload 的 URL，监听 alert 弹窗（弹=JS 真执行=XSS 成立）。
+
+        三态：CONFIRMED（dialog 触发）/ INCONCLUSIVE（未触发，不能排除）/ NOT_CONFIRMED（预留）。
+        WS 卡死会自动重启 Chrome 重试一次（见 _resilient）。
+        """
+        if not _HAS_WS:
+            raise CDPError("缺少 websocket-client")
+        return self._resilient(index, lambda tab: self._verify_xss_on(tab, url, wait))
+
+    def _verify_xss_on(self, tab, url, wait=4):
+        ws = websocket.create_connection(tab["ws"], timeout=wait + 8)
+        try:
+            ws.send(json.dumps({"id": 1, "method": "Page.enable", "params": {}}))
+            while True:
+                msg = json.loads(ws.recv())
+                if msg.get("id") == 1:
+                    break
+            ws.send(json.dumps({"id": 2, "method": "Page.navigate", "params": {"url": url}}))
+            deadline = time.time() + wait
+            dialog = None
+            while time.time() < deadline:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                ws.settimeout(remaining)
+                try:
+                    msg = json.loads(ws.recv())
+                except Exception:
+                    break
+                if msg.get("method") == "Page.javascriptDialogOpening":
+                    dialog = msg.get("params", {}).get("message", "")
+                    ws.send(json.dumps({"id": 99, "method": "Page.handleJavaScriptDialog",
+                                        "params": {"accept": True}}))
+                    break
+            if dialog is not None:
+                result = {
+                    "status": "CONFIRMED",
+                    "evidence": f"观察到 Page.javascriptDialogOpening，dialog 消息: {dialog}",
+                    "reason": "alert 弹窗触发，说明注入的 JS 在该执行路径上真的执行了",
+                    "scope": f"URL: {url}",
+                }
+            else:
+                result = {
+                    "status": "INCONCLUSIVE",
+                    "evidence": "导航完成，wait 窗口内未观察到 javascriptDialogOpening",
+                    "reason": "alert 未触发不能排除 XSS：可能 CSP 拦截 / 上下文不符 / payload 不合适 / 事件未触发",
+                    "scope": f"URL: {url}（黑盒验证，未读响应源码，故不判 NOT_CONFIRMED）",
+                }
+            return json.dumps(result, ensure_ascii=False)
+        finally:
+            ws.close()
+
+    def read_page_text(self, tab, timeout=10):
+        ws_url = tab.get("ws")
+        if not ws_url:
+            raise CDPError("该 tab 没有 webSocketDebuggerUrl")
+        return self._cdp_eval(ws_url, "document.body ? document.body.innerText : ''", timeout)
+
+    def read_page_html(self, tab, timeout=10):
+        ws_url = tab.get("ws")
+        if not ws_url:
+            raise CDPError("该 tab 没有 webSocketDebuggerUrl")
+        return self._cdp_eval(ws_url, "document.documentElement.outerHTML", timeout)
+
+
+# ---- 跨平台启动 / 发现 ----
+
+def _wsl_to_windows_path(path):
+    p = str(path)
+    if p.startswith("/mnt/") and len(p) > 6:
+        drive = p[5:6].upper()
+        rest = p[6:]
+        return f"{drive}:{rest}".replace("/", "\\")
+    return p.replace("/", "\\")
+
+
+def _is_wsl():
+    """仅在 WSL 下为真。launcher 代理只对 WSL 必需；原生 Windows/Git Bash/Mac/Linux 直连。"""
+    try:
+        with open("/proc/version", "r") as f:
+            ver = f.read().lower()
+        return "microsoft" in ver or "wsl" in ver
+    except Exception:
+        return False
+
+
+def find_launcher():
+    base = app_root()
+    for rel in ("tools/cdp/launcher/cdp_launcher.exe",):
+        p = base / rel
+        if p.exists():
+            return str(p)
+    return None
+
+
+def _find_chrome():
+    import shutil
+    for name in ("google-chrome", "chromium", "chromium-browser", "google-chrome-stable"):
+        p = shutil.which(name)
+        if p:
+            return p
+    mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if Path(mac).exists():
+        return mac
+    for c in (
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Chromium\Application\chrome.exe",
+    ):
+        if Path(c).exists():
+            return c
+    return None
+
+
+def _cleanup_wsl_cdp():
+    cmd = (
+        "Get-Process -Name cdp_launcher -ErrorAction SilentlyContinue | Stop-Process -Force; "
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Where-Object { $_.CommandLine -match 'remote-debugging-port' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(["powershell.exe", "-Command", cmd], capture_output=True, timeout=20)
+    except Exception:
+        pass
+
+
+def _kill_debug_chrome():
+    """跨平台杀掉带 --remote-debugging-port 的调试 Chrome（best-effort），用于卡死自愈重启。
+    只杀调试实例，不碰用户日常 Chrome（后者不带该参数）。"""
+    import sys as _sys
+    try:
+        if _sys.platform == "win32":
+            cmd = (
+                "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+                "Where-Object { $_.CommandLine -match 'remote-debugging-port' } | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            )
+            subprocess.run(["powershell.exe", "-NoProfile", "-Command", cmd],
+                           capture_output=True, timeout=20)
+        else:
+            subprocess.run(["pkill", "-f", "remote-debugging-port"],
+                           capture_output=True, timeout=10)
+    except Exception:
+        pass
+
+
+def launch_chrome(port=9222):
+    launcher = find_launcher()
+    if launcher and _is_wsl():
+        _cleanup_wsl_cdp()
+        time.sleep(2)
+        win_path = _wsl_to_windows_path(launcher)
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-Command", f"Start-Process '{win_path}'"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except (FileNotFoundError, OSError):
+            return False
+    chrome = _find_chrome()
+    if not chrome:
+        return False
+    try:
+        subprocess.Popen(
+            [chrome, f"--remote-debugging-port={port}", "--remote-allow-origins=*",
+             f"--user-data-dir={Path.home() / '.hackmate-chrome'}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def wait_for_cdp(host, port, timeout=25):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(f"http://{host}:{port}/json/version", timeout=2)
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+def resolve_cdp_host(host="localhost"):
+    """WSL 下 localhost 换成网关 IP（否则连不到 Windows Chrome proxy）；原生环境返回原值。"""
+    if host not in ("localhost", "127.0.0.1", "::1"):
+        return host
+    if not _is_wsl():
+        return host
+    try:
+        out = subprocess.run(["ip", "route", "show", "default"],
+                             capture_output=True, text=True, timeout=5).stdout
+        parts = out.split()
+        if "via" in parts:
+            gw = parts[parts.index("via") + 1]
+            if gw:
+                return gw
+    except Exception:
+        pass
+    return host
+
+
+def ensure_cdp(host, port, auto_launch=True, timeout=25):
+    host = resolve_cdp_host(host)
+    c = CDPClient(host, port)
+    try:
+        c._get_json("/json/version")
+        return c
+    except CDPError:
+        pass
+    if auto_launch and launch_chrome():
+        print("[cdp] 已触发 Chrome 启动，等待 CDP 就绪（如弹 UAC/MessageBox 请点确认）...")
+        if wait_for_cdp(host, port, timeout):
+            print("[cdp] CDP 已就绪")
+            return c
+        print("[cdp] 等待超时，CDP 仍未就绪")
+    return None

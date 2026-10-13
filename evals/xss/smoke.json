@@ -1,0 +1,9 @@
+[
+  {
+    "id": "smoke-L1",
+    "context": "反射点落在文本节点，无过滤",
+    "reference_payload": "<script>alert(1)</script>",
+    "principle": "",
+    "source": "auto"
+  }
+]

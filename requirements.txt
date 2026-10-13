@@ -1,0 +1,1 @@
+websocket-client  # 唯一第三方依赖：CDP 读 DOM / 监听 dialog（其余纯标准库）

