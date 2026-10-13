@@ -35,20 +35,27 @@ class CDPConnError(CDPError):
     pass
 
 
-# 「AI 引导光标」注入 JS：一个缓慢滑动的假光标 + 说明气泡，按 __STEPS__ 逐个指向元素并讲解。
-# 纯页面注入（不动真鼠标），刷新即消失。__STEPS__ 由 guide_tour() 替换成 [[sel,text,dur],...]。
+# 「AI 引导光标」注入 JS：假光标 + 说明气泡，手动一步步推进（点「下一步」才继续，不自动播放）。
+# 纯页面注入（不动真鼠标），刷新即消失。__STEPS__ 由 guide_tour() 替换成 [[sel,text,showcode],...]。
+# showcode=true 时气泡里展示该元素的真实 outerHTML（指出「源代码/反射点」）。
 _GUIDE_TOUR_JS = r"""
 (function(){
-  for(const id of ['hmCur','hmTip','hmStyle']){ const e=document.getElementById(id); if(e)e.remove(); }
+  function cleanup(){ for(const id of ['hmCur','hmTip','hmStyle']){const e=document.getElementById(id);if(e)e.remove();} }
+  cleanup();
   const st=document.createElement('style'); st.id='hmStyle';
   st.textContent=`
-    #hmCur{position:fixed;z-index:1000000;width:28px;height:28px;left:50%;top:50%;
-      pointer-events:none;transition:left 1.3s cubic-bezier(.4,0,.2,1),top 1.3s cubic-bezier(.4,0,.2,1);
+    #hmCur{position:fixed;z-index:1000000;width:28px;height:28px;left:50%;top:50%;pointer-events:none;
+      transition:left 1.0s cubic-bezier(.4,0,.2,1),top 1.0s cubic-bezier(.4,0,.2,1);
       filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}
-    #hmTip{position:fixed;z-index:1000000;max-width:300px;background:#111827;color:#f9fafb;
-      font:500 14px/1.5 system-ui,sans-serif;padding:10px 14px;border-radius:10px;
-      box-shadow:0 8px 24px rgba(0,0,0,.35);opacity:0;transition:opacity .4s,left 1.3s,top 1.3s;
-      border-left:3px solid #22c55e}
+    #hmTip{position:fixed;z-index:1000000;max-width:360px;background:#111827;color:#f9fafb;
+      font:500 14px/1.6 system-ui,sans-serif;padding:14px 16px;border-radius:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.4);transition:left .9s,top .9s;border-left:3px solid #22c55e}
+    #hmTip .hmStep{font-size:12px;color:#22c55e;font-weight:700;margin-bottom:6px;letter-spacing:.5px}
+    #hmTip pre{margin:10px 0 0;padding:8px;background:#0b1220;border-radius:8px;max-height:140px;
+      overflow:auto;font:12px/1.5 ui-monospace,Menlo,monospace;color:#93c5fd;white-space:pre-wrap;word-break:break-all}
+    #hmTip .hmBtn{margin-top:12px;background:#22c55e;color:#06281a;font-weight:700;border:none;
+      border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}
+    #hmTip .hmBtn:hover{background:#16a34a;color:#fff}
     .hmHot{outline:3px solid #f59e0b !important;outline-offset:2px;transition:outline .3s}
   `;
   document.head.appendChild(st);
@@ -57,28 +64,29 @@ _GUIDE_TOUR_JS = r"""
   document.body.appendChild(cur);
   const tip=document.createElement('div'); tip.id='hmTip'; document.body.appendChild(tip);
   const STEPS=__STEPS__;
-  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const q=s=>{try{return s?document.querySelector(s):null}catch(e){return null}};
-  (async()=>{
-    for(const [sel,text,dur] of STEPS){
-      const el=q(sel); let x=innerWidth/2,y=innerHeight/2;
-      if(el){const r=el.getBoundingClientRect();x=r.left+r.width/2;y=r.top+r.height/2;
-        el.classList.add('hmHot'); el.scrollIntoView({block:'center',behavior:'smooth'});}
-      cur.style.left=x+'px'; cur.style.top=y+'px';
-      tip.textContent=text;
-      tip.style.left=Math.max(12,Math.min(x+20,innerWidth-320))+'px';
-      tip.style.top=Math.min(y+24,innerHeight-80)+'px';
-      tip.style.opacity='1';
-      await sleep(dur);
-      tip.style.opacity='0';
-      if(el)el.classList.remove('hmHot');
-      await sleep(600);
-    }
-    tip.textContent='引导结束 ✓ 现在轮到你动手';
-    tip.style.left=(innerWidth/2-100)+'px'; tip.style.top=(innerHeight/2)+'px'; tip.style.opacity='1';
-    await sleep(2500); tip.style.opacity='0';
-  })();
-  return 'tour started';
+  let i=0, prev=null;
+  function render(){
+    if(prev){prev.classList.remove('hmHot');prev=null;}
+    const s=STEPS[i]||['body','',false]; const sel=s[0], text=s[1], showcode=s[2];
+    const el=q(sel); let x=innerWidth/2, y=innerHeight/2;
+    if(el){const r=el.getBoundingClientRect();x=r.left+r.width/2;y=r.top+r.height/2;
+      el.classList.add('hmHot'); prev=el; el.scrollIntoView({block:'center',behavior:'smooth'});}
+    cur.style.left=x+'px'; cur.style.top=y+'px';
+    tip.style.left=Math.max(12,Math.min(x+24,innerWidth-380))+'px';
+    tip.style.top=Math.max(12,Math.min(y+24,innerHeight-160))+'px';
+    const last=i===STEPS.length-1;
+    tip.innerHTML='';
+    const sc=document.createElement('div'); sc.className='hmStep'; sc.textContent=`步骤 ${i+1}/${STEPS.length}`;
+    const bd=document.createElement('div'); bd.textContent=text;
+    tip.appendChild(sc); tip.appendChild(bd);
+    if(showcode && el){ const pre=document.createElement('pre'); pre.textContent=el.outerHTML.slice(0,500); tip.appendChild(pre); }
+    const bt=document.createElement('button'); bt.className='hmBtn'; bt.textContent=last?'完成 ✓':'下一步 →';
+    bt.onclick=()=>{ if(last){cleanup();return;} i++; render(); };
+    tip.appendChild(bt);
+  }
+  render();   // 只显示第一步，等用户点「下一步」
+  return 'guide ready';
 })()
 """
 
@@ -295,19 +303,21 @@ class CDPClient:
         return self._cdp_eval(ws_url, "document.documentElement.outerHTML", timeout)
 
     def guide_tour(self, steps, index=0):
-        """注入「AI 引导光标」+ 说明气泡，按 steps 逐个缓慢滑到元素并讲解（教学用）。
+        """注入「AI 引导光标」+ 说明气泡，手动一步步推进（用户点「下一步」才继续，不自动播放）。
 
-        steps: [(selector, text, dur_ms), ...] 或 [{'selector','text','dur'}, ...]。
-        selector 找不到的元素会指向屏幕中央。返回 'tour started'（动画在页面内异步播放）。
+        steps: [(selector, text, showcode), ...] 或 [{'selector','text','code'}, ...]。
+        showcode=True 时气泡里展示该元素真实 outerHTML（指出源代码/反射点）。
+        selector 找不到的元素会指向屏幕中央。返回 'guide ready'（先只显示第一步）。
         """
         norm = []
         for s in steps:
             if isinstance(s, dict):
                 sel = s.get("selector") or s.get("sel") or "body"
-                norm.append([sel, str(s.get("text", "")), int(s.get("dur", 4500))])
+                code = bool(s.get("code") or s.get("showcode"))
+                norm.append([sel, str(s.get("text", "")), code])
             else:
-                dur = int(s[2]) if len(s) > 2 else 4500
-                norm.append([s[0] or "body", str(s[1]), dur])
+                code = bool(s[2]) if len(s) > 2 else False
+                norm.append([s[0] or "body", str(s[1]), code])
         js = _GUIDE_TOUR_JS.replace("__STEPS__", json.dumps(norm, ensure_ascii=False))
         return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
 

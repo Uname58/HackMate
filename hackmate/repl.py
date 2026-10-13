@@ -358,12 +358,21 @@ def _handle_cdp(line, ensure_cdp_client, client):
 
 
 _GUIDE_SYS = (
-    "你是靶场教学引导生成器。根据给定的当前关页面信息，产出 3-6 步引导，帮助用户理解并一步步"
-    "利用这一关的漏洞。只输出一个 JSON 数组，每项形如 "
-    '{"selector":"CSS选择器","text":"一句通俗中文说明","dur":4500}。'
-    "selector 必须指向页面上真实存在的元素，优先用给出的输入框 name/id（如 input[name=\"keyword\"]），"
-    "反射点/正文可用 h2 或 body。最后一步 selector 用 body、鼓励用户动手尝试。"
-    "text 要通俗易懂、讲清“为什么”，不要堆术语。只输出 JSON，不要解释、不要代码块标记。"
+    "你是靶场教学引导生成器。根据给定的当前关页面信息，产出 4-6 步引导，帮助用户理解并一步步"
+    "利用这一关的漏洞。引导是【手动推进】的：用户看完一步点「下一步」才到下一步，所以步骤要有清晰的递进顺序。\n"
+    "只输出一个 JSON 数组，每项形如 "
+    '{"selector":"CSS选择器","text":"一句通俗中文说明","code":false}。\n'
+    "规则：\n"
+    "- selector 必须指向页面上真实存在的元素，优先用给出的输入框 name/id（如 input[name=\"keyword\"]），"
+    "反射点/正文可用 h2 或 body。\n"
+    "- 【必须有一步指出源代码/反射点】：把 selector 指向用户输入在页面上出现的那个元素（反射点），并设 "
+    '"code":true —— 这样气泡会展示该元素的真实 HTML，让用户亲眼看到自己的输入落在哪段代码里。'
+    "若页面有 View Source / 查看源码 的按钮或链接，也可用一步指向它。\n"
+    "- 最后一步 selector 用 body、鼓励用户动手尝试。\n"
+    "- text 通俗易懂、讲清“为什么”，不堆术语。\n"
+    "- 这是 XSS（跨站脚本）靶场：引导只围绕 XSS 注入与过滤绕过，目标是让页面弹出 alert/confirm；"
+    "绝不要讲 SQL 注入、闭合 SQL 语句等其他漏洞。payload 示例要用 XSS 向量（如 <script>、\"> 闭合、事件处理器）。\n"
+    "只输出 JSON，不要解释、不要代码块标记。"
 )
 
 
@@ -383,12 +392,9 @@ def _parse_steps(raw):
             continue
         sel = s.get("selector") or s.get("sel") or "body"
         txt = str(s.get("text", "")).strip()
-        try:
-            dur = int(s.get("dur", 4500))
-        except (TypeError, ValueError):
-            dur = 4500
+        code = bool(s.get("code") or s.get("showcode"))
         if txt:
-            out.append([sel, txt, max(2000, min(dur, 8000))])
+            out.append([sel, txt, code])
     return out[:8]
 
 
@@ -405,13 +411,15 @@ def _handle_guide(ensure_cdp_client, client):
             return
         tab = tabs[0]
         entries = cdp.find_xss_entries()
-        text = cdp.read_page_text(tab)[:1500]
+        text = cdp.read_page_text(tab)[:1200]
+        html = cdp.read_page_html(tab)[:2500]
     except CDPError as e:
         print(_c(f"[guide] 读取页面失败: {e}", "red"))
         return
     print(_c(f"[guide] 正在分析当前页面「{tab.get('title', '')}」并生成引导...", "cyan"))
     gen = client.clone(system_prompt=_GUIDE_SYS)
     prompt = (f"当前关页面信息：\n注入点/表单：{entries}\n\n可见文本（节选）：\n{text}\n\n"
+              f"HTML 源码（节选，用于定位反射点/源码按钮的 CSS 选择器）：\n{html}\n\n"
               "请产出引导步骤 JSON 数组。")
     try:
         raw = gen.ask(prompt)
@@ -420,12 +428,14 @@ def _handle_guide(ensure_cdp_client, client):
         return
     steps = _parse_steps(raw)
     if not steps:
-        steps = [["input", "① 这是输入点：页面会接收你输入的内容", 4000],
-                 ["body", "② 没有过滤时，输入 <script>alert(1)</script> 会被当代码执行——弹窗=XSS 成立", 5000]]
+        steps = [["input", "① 这是输入点：页面会接收你输入的内容", False],
+                 ["body", "② 你的输入会原样出现在页面 HTML 里（反射点）——这是关键", True],
+                 ["body", "③ 没有过滤时，输入 <script>alert(1)</script> 会被当代码执行——弹窗=XSS 成立", False]]
         print(_c("[guide] 未能解析 AI 步骤，用通用引导兜底", "yellow"))
-    print(_c(f"[guide] 生成 {len(steps)} 步，去看调试 Chrome 窗口：", "cyan"))
+    print(_c(f"[guide] 生成 {len(steps)} 步（在调试 Chrome 里点「下一步」逐步推进）：", "cyan"))
     for i, s in enumerate(steps, 1):
-        print(_c(f"  {i}. {s[1]}", "dim"))
+        tag = " [含源码]" if len(s) > 2 and s[2] else ""
+        print(_c(f"  {i}. {s[1]}{tag}", "dim"))
     try:
         cdp.guide_tour(steps)
     except CDPError as e:
