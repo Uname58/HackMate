@@ -18,6 +18,11 @@ _IMPROVER_SYS = (
 def generate_candidate(cfg, base_client, vuln, variant, current, failures):
     """产一个候选 skill 文本。失败明细反哺（只补通用方法，不硬编码单题答案）。
 
+    反哺信号（相比旧版增强，便于学到可泛化方法而非背答案）：
+    - 喂全部失败 case（上限 8），不再只给 3 个。
+    - 每个 case 同时给「场景 / 一个可行参考解 / 当前 skill 实际产出的失败 payload」，
+      让慢模型看到「差距」在哪，从而提炼覆盖这类场景的通用手法/模板。
+
     base_client: 主 LLMClient，用 clone 出慢模型、独立上下文的生成器。
     """
     gen = base_client.clone(
@@ -28,11 +33,16 @@ def generate_candidate(cfg, base_client, vuln, variant, current, failures):
     prompt = f"当前 {vuln}/{variant} 的 skill 内容：\n\n{current}\n\n"
     if failures:
         prompt += (
-            "\n以下 case 当前判分失败，说明 skill 在这些场景有缺口，"
-            "请针对性补充（只补通用方法，不要硬编码单题答案）：\n"
+            "\n以下 case 当前判分失败，说明 skill 在这些场景有缺口。"
+            "请对比「参考解」与「失败产出」，找出当前知识为何没能引导出可行 payload，"
+            "补上能覆盖这类上下文的【通用方法/绕过模板/判定规则】——不要把参考解原样抄进去：\n"
         )
-        for f in failures[:3]:
-            prompt += f"- 场景：{f.get('context', '')}\n  参考答案：{f.get('reference', '')}\n"
+        for f in failures[:8]:
+            prompt += (
+                f"- 场景：{f.get('context', '')}\n"
+                f"  一个可行参考解：{f.get('reference', '')}\n"
+                f"  当前产出（判分失败）：{f.get('actual', '')}\n"
+            )
     prompt += "\n请输出改进后的完整 skill 内容。"
     try:
         return gen.ask(prompt)
