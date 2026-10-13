@@ -35,6 +35,22 @@ class CDPConnError(CDPError):
     pass
 
 
+# verify_xss 的交互触发：对带事件处理器的元素派发 mouseover/focus/click，并点 javascript: 链接，
+# 让需点击/悬停才触发的 XSS 也能弹窗。只碰有处理器的元素，不点普通链接（避免误导航）。
+_XSS_TRIGGER_JS = (
+    "(function(){try{"
+    "var s='[onclick],[onmouseover],[onmouseenter],[onfocus],[onpointerover],a[href^=\"javascript:\"]';"
+    "document.querySelectorAll(s).forEach(function(el){try{"
+    "el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));"
+    "el.dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}));"
+    "if(el.focus)el.focus();"
+    "el.dispatchEvent(new FocusEvent('focus',{bubbles:true}));"
+    "if(el.click)el.click();"
+    "}catch(e){}});"
+    "}catch(e){}return 'triggered';})()"
+)
+
+
 # 「AI 引导光标」注入 JS：假光标 + 说明气泡，手动一步步推进（点「下一步」才继续，不自动播放）。
 # 纯页面注入（不动真鼠标），刷新即消失。__STEPS__ 由 guide_tour() 替换成 [[sel,text,showcode],...]。
 # showcode=true 时气泡里展示该元素的真实 outerHTML（指出「源代码/反射点」）。
@@ -237,17 +253,19 @@ class CDPClient:
         )
         return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
 
-    def verify_xss(self, url, index=0, wait=4):
+    def verify_xss(self, url, index=0, wait=4, autotrigger=True):
         """黑盒验证：导航到带 payload 的 URL，监听 alert 弹窗（弹=JS 真执行=XSS 成立）。
 
         三态：CONFIRMED（dialog 触发）/ INCONCLUSIVE（未触发，不能排除）/ NOT_CONFIRMED（预留）。
+        autotrigger=True：导航后自动对带事件处理器的元素（onclick/onmouseover/onfocus、javascript: 链接）
+        派发 mouseover/focus/click，让需点击/悬停才触发的 XSS 也能验出来（纯 <script> 注入不受影响）。
         WS 卡死会自动重启 Chrome 重试一次（见 _resilient）。
         """
         if not _HAS_WS:
             raise CDPError("缺少 websocket-client")
-        return self._resilient(index, lambda tab: self._verify_xss_on(tab, url, wait))
+        return self._resilient(index, lambda tab: self._verify_xss_on(tab, url, wait, autotrigger))
 
-    def _verify_xss_on(self, tab, url, wait=4):
+    def _verify_xss_on(self, tab, url, wait=4, autotrigger=True):
         ws = websocket.create_connection(tab["ws"], timeout=wait + 8)
         try:
             ws.send(json.dumps({"id": 1, "method": "Page.enable", "params": {}}))
@@ -257,16 +275,22 @@ class CDPClient:
                     break
             ws.send(json.dumps({"id": 2, "method": "Page.navigate", "params": {"url": url}}))
             deadline = time.time() + wait
+            trigger_at = time.time() + 1.2 if autotrigger else None
+            triggered = not autotrigger
             dialog = None
             while time.time() < deadline:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    break
-                ws.settimeout(remaining)
+                if not triggered and time.time() >= trigger_at:
+                    try:
+                        ws.send(json.dumps({"id": 3, "method": "Runtime.evaluate",
+                                            "params": {"expression": _XSS_TRIGGER_JS}}))
+                    except Exception:
+                        pass
+                    triggered = True
+                ws.settimeout(0.3)
                 try:
                     msg = json.loads(ws.recv())
                 except Exception:
-                    break
+                    continue  # 0.3s 轮询片无消息，继续等（可能稍后才触发 dialog）
                 if msg.get("method") == "Page.javascriptDialogOpening":
                     dialog = msg.get("params", {}).get("message", "")
                     ws.send(json.dumps({"id": 99, "method": "Page.handleJavaScriptDialog",
