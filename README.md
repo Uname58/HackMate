@@ -22,8 +22,11 @@ python chat.py cdp        # 列出 Chrome 页面
 python chat.py memory     # 查看偏好 + 项目状态
 ```
 
-对话内：`/help` `/clear` `/stop` `/cdp` `/cdp read N` `/skill` `/memory` `/log` `/log steps`
+对话内：`/help` `/clear` `/stop` `/cdp` `/cdp read N` `/guide` `/skill` `/memory` `/log` `/log steps`
 `/jobs` `/job N` `/cancel N` `/exit`
+
+- **`/guide`** —— AI 教学引导：读当前靶场页面 → LLM 现场生成针对性步骤 → 在调试 Chrome 里用一个
+  缓慢移动的「AI 光标」+ 说明气泡，一步步带你理解并利用这一关（纯页面注入，不动你真鼠标）。
 
 ## v2 两个根本变化
 

@@ -26,6 +26,7 @@ HELP = """命令:
   /stop         停止当前任务（清空上下文，回到干净对话）
   /cdp          查看当前 Chrome 打开的页面（带序号，注入上下文）
   /cdp read N   读第 N 个页面的可见文本
+  /guide        AI 引导：读当前关 → 生成步骤 → 调试 Chrome 里光标带你一步步学
   /skill        列出可用漏洞知识（skills/）
   /memory       查看长记忆 + 当前项目状态
   /log          查看最近 10 条关键结果（skill/漏洞/case）
@@ -264,6 +265,9 @@ def chat_loop():
                 continue
             print(f"已请求中断 #{jid}" if jobs.cancel(jid) else f"无法中断 #{jid}（不存在或已结束）")
             continue
+        if line == "/guide":
+            _handle_guide(ensure_cdp_client, client)
+            continue
         if line.startswith("/cdp"):
             _handle_cdp(line, ensure_cdp_client, client)
             continue
@@ -351,6 +355,81 @@ def _handle_cdp(line, ensure_cdp_client, client):
         f"- {i}: {t['title']}  |  {t['url']}" for i, t in enumerate(tabs))
     print(f"\n{summary}\n")
     client.messages.append({"role": "user", "content": f"[工具/Chrome] {summary}"})
+
+
+_GUIDE_SYS = (
+    "你是靶场教学引导生成器。根据给定的当前关页面信息，产出 3-6 步引导，帮助用户理解并一步步"
+    "利用这一关的漏洞。只输出一个 JSON 数组，每项形如 "
+    '{"selector":"CSS选择器","text":"一句通俗中文说明","dur":4500}。'
+    "selector 必须指向页面上真实存在的元素，优先用给出的输入框 name/id（如 input[name=\"keyword\"]），"
+    "反射点/正文可用 h2 或 body。最后一步 selector 用 body、鼓励用户动手尝试。"
+    "text 要通俗易懂、讲清“为什么”，不要堆术语。只输出 JSON，不要解释、不要代码块标记。"
+)
+
+
+def _parse_steps(raw):
+    import re
+    t = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
+    m = re.search(r"\[.*\]", t, re.S)
+    if m:
+        t = m.group(0)
+    try:
+        data = json.loads(t)
+    except Exception:
+        return []
+    out = []
+    for s in data if isinstance(data, list) else []:
+        if not isinstance(s, dict):
+            continue
+        sel = s.get("selector") or s.get("sel") or "body"
+        txt = str(s.get("text", "")).strip()
+        try:
+            dur = int(s.get("dur", 4500))
+        except (TypeError, ValueError):
+            dur = 4500
+        if txt:
+            out.append([sel, txt, max(2000, min(dur, 8000))])
+    return out[:8]
+
+
+def _handle_guide(ensure_cdp_client, client):
+    from .cdp import CDPError
+    cdp = ensure_cdp_client()
+    if cdp is None:
+        print(_c("[guide] CDP 未就绪（先 /cdp 把调试 Chrome 拉起，并打开要学的靶场页面）", "red"))
+        return
+    try:
+        tabs = cdp.list_tabs()
+        if not tabs:
+            print(_c("[guide] 没有页面 tab", "red"))
+            return
+        tab = tabs[0]
+        entries = cdp.find_xss_entries()
+        text = cdp.read_page_text(tab)[:1500]
+    except CDPError as e:
+        print(_c(f"[guide] 读取页面失败: {e}", "red"))
+        return
+    print(_c(f"[guide] 正在分析当前页面「{tab.get('title', '')}」并生成引导...", "cyan"))
+    gen = client.clone(system_prompt=_GUIDE_SYS)
+    prompt = (f"当前关页面信息：\n注入点/表单：{entries}\n\n可见文本（节选）：\n{text}\n\n"
+              "请产出引导步骤 JSON 数组。")
+    try:
+        raw = gen.ask(prompt)
+    except LLMError as e:
+        print(_c(f"[guide] 生成引导失败: {e}", "red"))
+        return
+    steps = _parse_steps(raw)
+    if not steps:
+        steps = [["input", "① 这是输入点：页面会接收你输入的内容", 4000],
+                 ["body", "② 没有过滤时，输入 <script>alert(1)</script> 会被当代码执行——弹窗=XSS 成立", 5000]]
+        print(_c("[guide] 未能解析 AI 步骤，用通用引导兜底", "yellow"))
+    print(_c(f"[guide] 生成 {len(steps)} 步，去看调试 Chrome 窗口：", "cyan"))
+    for i, s in enumerate(steps, 1):
+        print(_c(f"  {i}. {s[1]}", "dim"))
+    try:
+        cdp.guide_tour(steps)
+    except CDPError as e:
+        print(_c(f"[guide] 注入失败: {e}", "red"))
 
 
 def cmd_skill():

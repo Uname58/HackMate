@@ -35,6 +35,54 @@ class CDPConnError(CDPError):
     pass
 
 
+# 「AI 引导光标」注入 JS：一个缓慢滑动的假光标 + 说明气泡，按 __STEPS__ 逐个指向元素并讲解。
+# 纯页面注入（不动真鼠标），刷新即消失。__STEPS__ 由 guide_tour() 替换成 [[sel,text,dur],...]。
+_GUIDE_TOUR_JS = r"""
+(function(){
+  for(const id of ['hmCur','hmTip','hmStyle']){ const e=document.getElementById(id); if(e)e.remove(); }
+  const st=document.createElement('style'); st.id='hmStyle';
+  st.textContent=`
+    #hmCur{position:fixed;z-index:1000000;width:28px;height:28px;left:50%;top:50%;
+      pointer-events:none;transition:left 1.3s cubic-bezier(.4,0,.2,1),top 1.3s cubic-bezier(.4,0,.2,1);
+      filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}
+    #hmTip{position:fixed;z-index:1000000;max-width:300px;background:#111827;color:#f9fafb;
+      font:500 14px/1.5 system-ui,sans-serif;padding:10px 14px;border-radius:10px;
+      box-shadow:0 8px 24px rgba(0,0,0,.35);opacity:0;transition:opacity .4s,left 1.3s,top 1.3s;
+      border-left:3px solid #22c55e}
+    .hmHot{outline:3px solid #f59e0b !important;outline-offset:2px;transition:outline .3s}
+  `;
+  document.head.appendChild(st);
+  const cur=document.createElement('div'); cur.id='hmCur';
+  cur.innerHTML='<svg viewBox="0 0 24 24" width="28" height="28"><path d="M4 2l16 7-6 2-2 6z" fill="#22c55e" stroke="#065f46" stroke-width="1.2"/></svg>';
+  document.body.appendChild(cur);
+  const tip=document.createElement('div'); tip.id='hmTip'; document.body.appendChild(tip);
+  const STEPS=__STEPS__;
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const q=s=>{try{return s?document.querySelector(s):null}catch(e){return null}};
+  (async()=>{
+    for(const [sel,text,dur] of STEPS){
+      const el=q(sel); let x=innerWidth/2,y=innerHeight/2;
+      if(el){const r=el.getBoundingClientRect();x=r.left+r.width/2;y=r.top+r.height/2;
+        el.classList.add('hmHot'); el.scrollIntoView({block:'center',behavior:'smooth'});}
+      cur.style.left=x+'px'; cur.style.top=y+'px';
+      tip.textContent=text;
+      tip.style.left=Math.max(12,Math.min(x+20,innerWidth-320))+'px';
+      tip.style.top=Math.min(y+24,innerHeight-80)+'px';
+      tip.style.opacity='1';
+      await sleep(dur);
+      tip.style.opacity='0';
+      if(el)el.classList.remove('hmHot');
+      await sleep(600);
+    }
+    tip.textContent='引导结束 ✓ 现在轮到你动手';
+    tip.style.left=(innerWidth/2-100)+'px'; tip.style.top=(innerHeight/2)+'px'; tip.style.opacity='1';
+    await sleep(2500); tip.style.opacity='0';
+  })();
+  return 'tour started';
+})()
+"""
+
+
 class CDPClient:
     def __init__(self, host="localhost", port=9222, timeout=5):
         self.host = host
@@ -245,6 +293,23 @@ class CDPClient:
         if not ws_url:
             raise CDPError("该 tab 没有 webSocketDebuggerUrl")
         return self._cdp_eval(ws_url, "document.documentElement.outerHTML", timeout)
+
+    def guide_tour(self, steps, index=0):
+        """注入「AI 引导光标」+ 说明气泡，按 steps 逐个缓慢滑到元素并讲解（教学用）。
+
+        steps: [(selector, text, dur_ms), ...] 或 [{'selector','text','dur'}, ...]。
+        selector 找不到的元素会指向屏幕中央。返回 'tour started'（动画在页面内异步播放）。
+        """
+        norm = []
+        for s in steps:
+            if isinstance(s, dict):
+                sel = s.get("selector") or s.get("sel") or "body"
+                norm.append([sel, str(s.get("text", "")), int(s.get("dur", 4500))])
+            else:
+                dur = int(s[2]) if len(s) > 2 else 4500
+                norm.append([s[0] or "body", str(s[1]), dur])
+        js = _GUIDE_TOUR_JS.replace("__STEPS__", json.dumps(norm, ensure_ascii=False))
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
 
 
 # ---- 跨平台启动 / 发现 ----
