@@ -85,39 +85,39 @@ def _h_list_tabs(args, ctx):
 
 
 def _h_open_new_tab(args, ctx):
-    tab = _cdp(ctx).open_new_tab(args.get("url", "about:blank"))
-    return json.dumps({"opened": tab.get("title", ""), "url": tab.get("url", "")},
+    cdp = _cdp(ctx)
+    tab = cdp.ensure_test_tab()
+    url = args.get("url")
+    if url:
+        cdp.navigate(url, test_tab=True)
+    return json.dumps({"test_tab": True, "url": url or tab.get("url", "")},
                       ensure_ascii=False)
 
 
 def _h_read_page_text(args, ctx):
     c = _cdp(ctx)
-    tabs = c.list_tabs()
-    idx = int(args.get("index", 0))
-    if not (0 <= idx < len(tabs)):
-        return f"序号 {idx} 超出范围（0-{len(tabs)-1}）"
-    text = c.read_page_text(tabs[idx])
+    text = c.read_page_text(test_tab=True)
     return text[:2000] if len(text) > 2000 else text
 
 
 def _h_navigate(args, ctx):
-    return _cdp(ctx).navigate(args.get("url", "about:blank"), int(args.get("index", 0)))
+    return _cdp(ctx).navigate(args.get("url", "about:blank"), test_tab=True)
 
 
 def _h_fill_form(args, ctx):
-    return _cdp(ctx).fill_form(args["selector"], args["value"], int(args.get("index", 0)))
+    return _cdp(ctx).fill_form(args["selector"], args["value"], test_tab=True)
 
 
 def _h_click(args, ctx):
-    return _cdp(ctx).click(args["selector"], int(args.get("index", 0)))
+    return _cdp(ctx).click(args["selector"], test_tab=True)
 
 
 def _h_find_xss_entries(args, ctx):
-    return _cdp(ctx).find_xss_entries(int(args.get("index", 0)))
+    return _cdp(ctx).find_xss_entries(test_tab=True)
 
 
 def _h_verify_xss(args, ctx):
-    result = _cdp(ctx).verify_xss(args["url"], int(args.get("index", 0)))
+    result = _cdp(ctx).verify_xss(args["url"], test_tab=True)
     try:
         if json.loads(result).get("status") == "CONFIRMED":
             log.record("vuln", url=args["url"], params=log.extract_params(args["url"]))
@@ -177,22 +177,21 @@ REGISTRY = [
     },
     {
         "name": "open_new_tab",
-        "description": "在 Chrome 里开一个新标签页并导航到指定 URL（空白页用 about:blank）",
-        "parameters": _obj({"url": {"type": "string", "description": "要打开的 URL，默认 about:blank"}}),
+        "description": "打开或复用 HackMate 专用测试标签。首次创建一个标签，之后始终在同一个标签导航；不要为测试再创建新标签。URL 可省略以保留当前测试页。",
+        "parameters": _obj({"url": {"type": "string", "description": "要在专用测试标签打开的 URL；省略时保留当前页面"}}),
         "handler": _h_open_new_tab,
     },
     {
         "name": "read_page_text",
-        "description": "读第 index 个页面的可见文本内容",
-        "parameters": _obj({"index": {"type": "integer", "description": "页面序号，从 0 开始"}}, ["index"]),
+        "description": "读取 HackMate 专用测试标签的可见文本内容",
+        "parameters": _obj({}),
         "handler": _h_read_page_text,
     },
     {
         "name": "navigate",
-        "description": "导航第 index 个页面到指定 URL",
+        "description": "在 HackMate 专用测试标签导航到指定 URL；测试期间始终复用同一个标签",
         "parameters": _obj({
             "url": {"type": "string", "description": "目标 URL"},
-            "index": {"type": "integer", "description": "页面序号，默认 0"},
         }, ["url"]),
         "handler": _h_navigate,
     },
@@ -202,31 +201,28 @@ REGISTRY = [
         "parameters": _obj({
             "selector": {"type": "string", "description": "CSS selector，如 #username"},
             "value": {"type": "string", "description": "要填的值"},
-            "index": {"type": "integer", "description": "页面序号，默认 0"},
         }, ["selector", "value"]),
         "handler": _h_fill_form,
     },
     {
         "name": "click",
-        "description": "点击第 index 个页面上的元素（CSS selector）",
+        "description": "点击 HackMate 专用测试标签上的元素（CSS selector）",
         "parameters": _obj({
             "selector": {"type": "string", "description": "CSS selector"},
-            "index": {"type": "integer", "description": "页面序号，默认 0"},
         }, ["selector"]),
         "handler": _h_click,
     },
     {
         "name": "find_xss_entries",
-        "description": "扫描第 index 个页面的 XSS 注入点候选（输入框、表单、URL 参数、带参数链接）",
-        "parameters": _obj({"index": {"type": "integer", "description": "页面序号，默认 0"}}),
+        "description": "扫描 HackMate 专用测试标签的 XSS 注入点候选（输入框、表单、URL 参数、带参数链接）",
+        "parameters": _obj({}),
         "handler": _h_find_xss_entries,
     },
     {
         "name": "verify_xss",
-        "description": "黑盒验证 XSS：导航到带 payload 的完整 URL，检测 alert 弹窗是否触发（触发=JS 执行=XSS 成立）",
+        "description": "在 HackMate 专用测试标签黑盒验证 XSS：导航到带 payload 的完整 URL，检测 alert 弹窗是否触发（触发=JS 执行=XSS 成立）",
         "parameters": _obj({
             "url": {"type": "string", "description": "带 XSS payload 的完整 URL"},
-            "index": {"type": "integer", "description": "页面序号，默认 0"},
         }, ["url"]),
         "handler": _h_verify_xss,
     },

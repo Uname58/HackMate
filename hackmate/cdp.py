@@ -113,6 +113,7 @@ class CDPClient:
         self.port = port
         self.base = f"http://{host}:{port}"
         self.timeout = timeout
+        self._test_tab_id = None
 
     def _get_json(self, path):
         url = f"{self.base}{path}"
@@ -148,6 +149,19 @@ class CDPClient:
         except Exception as e:
             raise CDPError(f"开新标签页失败: {e}")
 
+    def ensure_test_tab(self, initial_url="about:blank"):
+        """返回 HackMate 专用测试标签；同一 CDPClient 生命周期内只创建一次。"""
+        tabs = self.list_tabs()
+        if self._test_tab_id:
+            for tab in tabs:
+                if tab.get("id") == self._test_tab_id:
+                    return tab
+        tab = self.open_new_tab(initial_url)
+        self._test_tab_id = tab.get("id")
+        if not self._test_tab_id:
+            raise CDPError("创建测试标签失败：Chrome 未返回 tab id")
+        return tab
+
     def _cdp_cmd(self, ws_url, method, params=None, timeout=10):
         if not _HAS_WS:
             raise CDPError("缺少 websocket-client，请 pip install websocket-client")
@@ -174,8 +188,13 @@ class CDPClient:
             raise CDPError(f"Runtime.evaluate 出错: {r.get('description', '')}")
         return r.get("value", "")
 
-    def _get_tab(self, index=0):
+    def _get_tab(self, index=0, tab_id=None):
         tabs = self.list_tabs()
+        if tab_id:
+            for tab in tabs:
+                if tab.get("id") == tab_id:
+                    return tab
+            raise CDPError(f"找不到标签 id={tab_id}")
         if not (0 <= index < len(tabs)):
             raise CDPError(f"序号 {index} 超出范围（0-{len(tabs)-1}）")
         return tabs[index]
@@ -187,22 +206,28 @@ class CDPClient:
         launch_chrome(self.port)
         return wait_for_cdp(self.host, self.port, timeout=25)
 
-    def _resilient(self, index, op):
+    def _resilient(self, index, op, tab_id=None, test_tab=False):
         """跑 op(tab)；WS 卡死(超时/断开)或端点连不上则重启 Chrome、重取 tab、重试一次，仍失败才抛。"""
         try:
-            return op(self._get_tab(index))
+            tab = self.ensure_test_tab() if test_tab else self._get_tab(index, tab_id)
+            return op(tab)
         except _WS_ERRORS + (CDPConnError,):
             if not self.restart():
                 raise
-            return op(self._get_tab(index))
+            if test_tab:
+                self._test_tab_id = None
+                tab = self.ensure_test_tab()
+            else:
+                tab = self._get_tab(index)
+            return op(tab)
 
-    def navigate(self, url, index=0):
+    def navigate(self, url, index=0, test_tab=False):
         def op(tab):
             self._cdp_cmd(tab["ws"], "Page.navigate", {"url": url})
             return f"已导航到 {url}"
-        return self._resilient(index, op)
+        return self._resilient(index, op, test_tab=test_tab)
 
-    def fill_form(self, selector, value, index=0):
+    def fill_form(self, selector, value, index=0, test_tab=False):
         js = (
             "(function(){"
             f"const el=document.querySelector({json.dumps(selector)});"
@@ -219,9 +244,10 @@ class CDPClient:
             "return '已填: '+" + json.dumps(selector) + ";"
             "})()"
         )
-        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
+                               test_tab=test_tab)
 
-    def click(self, selector, index=0):
+    def click(self, selector, index=0, test_tab=False):
         js = (
             "(function(){"
             f"const el=document.querySelector({json.dumps(selector)});"
@@ -230,9 +256,10 @@ class CDPClient:
             "return '已点击: '+" + json.dumps(selector) + ";"
             "})()"
         )
-        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
+                               test_tab=test_tab)
 
-    def find_xss_entries(self, index=0):
+    def find_xss_entries(self, index=0, test_tab=False):
         js = (
             "(function(){"
             "const out={url:location.href,"
@@ -251,9 +278,10 @@ class CDPClient:
             "return JSON.stringify(out);"
             "})()"
         )
-        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
+                               test_tab=test_tab)
 
-    def verify_xss(self, url, index=0, wait=4, autotrigger=True):
+    def verify_xss(self, url, index=0, wait=4, autotrigger=True, test_tab=False):
         """黑盒验证：导航到带 payload 的 URL，监听 alert 弹窗（弹=JS 真执行=XSS 成立）。
 
         三态：CONFIRMED（dialog 触发）/ INCONCLUSIVE（未触发，不能排除）/ NOT_CONFIRMED（预留）。
@@ -263,7 +291,9 @@ class CDPClient:
         """
         if not _HAS_WS:
             raise CDPError("缺少 websocket-client")
-        return self._resilient(index, lambda tab: self._verify_xss_on(tab, url, wait, autotrigger))
+        return self._resilient(
+            index, lambda tab: self._verify_xss_on(tab, url, wait, autotrigger),
+            test_tab=test_tab)
 
     def _verify_xss_on(self, tab, url, wait=4, autotrigger=True):
         ws = websocket.create_connection(tab["ws"], timeout=wait + 8)
@@ -314,19 +344,33 @@ class CDPClient:
         finally:
             ws.close()
 
-    def read_page_text(self, tab, timeout=10):
+    def read_page_text(self, tab=None, timeout=10, test_tab=False):
+        if test_tab:
+            return self._resilient(
+                0, lambda target: self._cdp_eval(
+                    target["ws"], "document.body ? document.body.innerText : ''", timeout),
+                test_tab=True)
+        if tab is None:
+            tab = self._get_tab(0)
         ws_url = tab.get("ws")
         if not ws_url:
             raise CDPError("该 tab 没有 webSocketDebuggerUrl")
         return self._cdp_eval(ws_url, "document.body ? document.body.innerText : ''", timeout)
 
-    def read_page_html(self, tab, timeout=10):
+    def read_page_html(self, tab=None, timeout=10, test_tab=False):
+        if test_tab:
+            return self._resilient(
+                0, lambda target: self._cdp_eval(
+                    target["ws"], "document.documentElement.outerHTML", timeout),
+                test_tab=True)
+        if tab is None:
+            tab = self._get_tab(0)
         ws_url = tab.get("ws")
         if not ws_url:
             raise CDPError("该 tab 没有 webSocketDebuggerUrl")
         return self._cdp_eval(ws_url, "document.documentElement.outerHTML", timeout)
 
-    def guide_tour(self, steps, index=0):
+    def guide_tour(self, steps, index=0, test_tab=False):
         """注入「AI 引导光标」+ 说明气泡，手动一步步推进（用户点「下一步」才继续，不自动播放）。
 
         steps: [(selector, text, showcode), ...] 或 [{'selector','text','code'}, ...]。
@@ -343,7 +387,8 @@ class CDPClient:
                 code = bool(s[2]) if len(s) > 2 else False
                 norm.append([s[0] or "body", str(s[1]), code])
         js = _GUIDE_TOUR_JS.replace("__STEPS__", json.dumps(norm, ensure_ascii=False))
-        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js))
+        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
+                               test_tab=test_tab)
 
 
 # ---- 跨平台启动 / 发现 ----

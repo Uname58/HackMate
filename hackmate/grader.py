@@ -96,7 +96,7 @@ def browser_verify(case, payload, cdp, index=0):
     try:
         full = url.replace("{payload}", quote(payload, safe=""))
         import json
-        res = json.loads(cdp.verify_xss(full, index=index))
+        res = json.loads(cdp.verify_xss(full, index=index, test_tab=True))
         return res.get("status") == "CONFIRMED"
     except Exception:
         return None  # 真验失败不作数，落到评委

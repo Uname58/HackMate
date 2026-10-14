@@ -71,15 +71,24 @@ def _render_tool(fn, args, result):
     url = args.get("url", "")
     rs = str(result)
     if fn == "verify_xss":
-        if '"CONFIRMED"' in rs or "CONFIRMED" in rs:
+        status = ""
+        try:
+            status = json.loads(rs).get("status", "")
+        except Exception:
+            pass
+        if status == "CONFIRMED":
             return _c(f"  ✓ 验证 CONFIRMED  {url}", "green")
-        if "INCONCLUSIVE" in rs:
+        if status == "INCONCLUSIVE":
             return _c(f"  ? 验证 未触发    {url}", "yellow")
-        return _c(f"  ✗ 验证 {rs[:40]}  {url}", "red")
+        if status == "NOT_CONFIRMED":
+            return _c(f"  ✗ 验证 未成立    {url}", "red")
+        return _c(f"  · 验证 {rs[:40]}  {url}", "dim")
     if fn == "save_case":
         return _c(f"  ✎ 记录 case [{args.get('vuln','')}] {rs}", "green")
     if fn == "improve_skill":
         return _c(f"  ⚙ 提交 skill 优化 '{args.get('vuln','')}/{args.get('variant','')}'（后台 Job）", "magenta")
+    if fn == "open_new_tab":
+        return _c(f"  ↗ 打开/复用测试页 {url}".rstrip(), "cyan")
     if fn == "navigate":
         return _c(f"  → 导航 {url}", "cyan")
     if fn == "save_project":
@@ -87,14 +96,14 @@ def _render_tool(fn, args, result):
     # 其余侦察/操作类：暗色一行
     hint = url or args.get("selector", "") or args.get("vuln", "")
     _names = {"find_xss_entries": "侦察注入点", "read_page_text": "读页面文本",
-              "list_tabs": "列标签", "open_new_tab": "开标签", "fill_form": "填表单",
+              "list_tabs": "列标签", "fill_form": "填表单",
               "click": "点击", "load_skill": "读 skill"}
     return _c(f"  · {_names.get(fn, fn)} {hint}".rstrip(), "dim")
 
 
 # 成功 exploit 五段报告的字段配色
 _REPORT_FIELDS = {"目标URL": "cyan", "测试parameter": "cyan", "注入payload": "green",
-                  "原理": "magenta", "流程": "magenta"}
+                  "原理": "magenta", "流程": "magenta", "CVSS": "red"}
 
 
 def _colorize_report(text):
@@ -110,9 +119,10 @@ def _colorize_report(text):
             for sep in ("：", ":"):
                 if s.startswith(label + sep):
                     rest = s[len(label + sep):]
-                    # payload 整行高亮（含值），其余只给标签上色
-                    body = f"{label}{sep}{rest}" if label == "注入payload" else f"{label}{sep}"
-                    tail = "" if label == "注入payload" else rest
+                    # payload / CVSS 整行高亮（含值），其余只给标签上色
+                    whole_line = label in ("注入payload", "CVSS")
+                    body = f"{label}{sep}{rest}" if whole_line else f"{label}{sep}"
+                    tail = "" if whole_line else rest
                     out.append(indent + _c(body, color) + tail)
                     hit = True
                     break
@@ -138,7 +148,7 @@ def build_system_prompt(cfg):
         parts.append("## 最近步骤日志（最新进展，优先于上面的中记忆）\n" + steps)
     sk = skill.summary()
     if sk:
-        parts.append(sk + "\n（用 /skill 查看漏洞知识）")
+        parts.append(sk + "\n（⚠️ 打关前必须先 load_skill 读完整知识，规则正文不在此摘要里）")
     return "\n\n".join(parts)
 
 
@@ -409,10 +419,10 @@ def _handle_guide(ensure_cdp_client, client):
         if not tabs:
             print(_c("[guide] 没有页面 tab", "red"))
             return
-        tab = tabs[0]
-        entries = cdp.find_xss_entries()
-        text = cdp.read_page_text(tab)[:1200]
-        html = cdp.read_page_html(tab)[:2500]
+        tab = cdp.ensure_test_tab(initial_url=tabs[0].get("url") or "about:blank")
+        entries = cdp.find_xss_entries(test_tab=True)
+        text = cdp.read_page_text(test_tab=True)[:1200]
+        html = cdp.read_page_html(test_tab=True)[:2500]
     except CDPError as e:
         print(_c(f"[guide] 读取页面失败: {e}", "red"))
         return
@@ -437,7 +447,7 @@ def _handle_guide(ensure_cdp_client, client):
         tag = " [含源码]" if len(s) > 2 and s[2] else ""
         print(_c(f"  {i}. {s[1]}{tag}", "dim"))
     try:
-        cdp.guide_tour(steps)
+        cdp.guide_tour(steps, test_tab=True)
     except CDPError as e:
         print(_c(f"[guide] 注入失败: {e}", "red"))
 
