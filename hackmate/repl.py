@@ -26,6 +26,7 @@ HELP = """命令:
   /stop         停止当前任务（清空上下文，回到干净对话）
   /cdp          查看当前 Chrome 打开的页面（带序号，注入上下文）
   /cdp read N   读第 N 个页面的可见文本
+  /web          打开 Web 图形工作台（行动记录 / 对话 / 工具箱）
   /guide        AI 引导：读当前关 → 生成步骤 → 调试 Chrome 里光标带你一步步学
   /skill        列出可用漏洞知识（skills/）
   /memory       查看长记忆 + 当前项目状态
@@ -253,6 +254,17 @@ def chat_loop():
             continue
         if line == "/log steps":
             print(log.format_steps(20))
+            continue
+        if line == "/web":
+            try:
+                from .webui import open_ui
+                url, opened = open_ui()
+                if opened:
+                    print(_c(f"[web] 已在浏览器打开工作台：{url}", "green"))
+                else:
+                    print(_yellow(f"[web] 工作台已启动：{url}（请复制到浏览器打开）"))
+            except Exception as e:
+                print(_c(f"[web] 无法启动工作台：{e}", "red"))
             continue
         if line == "/jobs":
             js = jobs.list_jobs()
@@ -499,6 +511,9 @@ def main(argv=None):
     p_cdp.add_argument("index", nargs="?", type=int, default=0)
     sub.add_parser("memory", help="查看长记忆 + 当前项目")
     sub.add_parser("log", help="查看最近关键事件")
+    p_web = sub.add_parser("web", help="启动本机 Web 工作台")
+    p_web.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "localhost"])
+    p_web.add_argument("--port", type=int, default=8765)
     args = parser.parse_args(argv)
     _enable_ansi()
 
@@ -510,6 +525,9 @@ def main(argv=None):
         return cmd_memory()
     if args.cmd == "log":
         return cmd_log()
+    if args.cmd == "web":
+        from .webui import serve
+        return serve(args.host, args.port)
     return chat_loop()
 
 

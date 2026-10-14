@@ -8,6 +8,9 @@ v2 变化（相对 v1）：
 """
 
 import json
+import http.client
+import socket
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -15,6 +18,10 @@ import urllib.error
 
 class LLMError(Exception):
     """LLM 调用失败。"""
+
+
+class LLMCancelled(LLMError):
+    """LLM 请求被用户主动停止。"""
 
 
 class _RetryableError(LLMError):
@@ -30,8 +37,35 @@ class LLMClient:
         self.max_retries = max_retries
         self.system_prompt = system_prompt
         self.messages = []
+        self._cancel_event = None
+        self._active_connection = None
+        self._connection_lock = threading.Lock()
         if system_prompt:
             self.messages.append({"role": "system", "content": system_prompt})
+
+    def set_cancel_event(self, event):
+        self._cancel_event = event
+
+    def _raise_if_cancelled(self):
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise LLMCancelled("请求已停止")
+
+    def abort(self):
+        """关闭当前 HTTP 连接，让正在等待模型回复的请求尽快退出。"""
+        with self._connection_lock:
+            connection = self._active_connection
+        if connection is None:
+            return
+        sock = connection.sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        try:
+            connection.close()
+        except OSError:
+            pass
 
     def clone(self, system_prompt="", model=None, timeout=None):
         """复用连接配置，产一个独立上下文的子客户端（不共享 messages）。"""
@@ -59,35 +93,86 @@ class LLMClient:
         )
         last = None
         for attempt in range(self.max_retries + 1):
+            self._raise_if_cancelled()
             try:
-                return self._once(req)
+                response = self._once(req)
+                self._raise_if_cancelled()
+                return response
             except _RetryableError as e:
+                if self._cancel_event is not None and self._cancel_event.is_set():
+                    raise LLMCancelled("请求已停止") from e
                 last = e
                 if attempt < self.max_retries:
-                    time.sleep(attempt + 1)  # 1s、2s 退避
+                    if self._cancel_event is not None:
+                        if self._cancel_event.wait(attempt + 1):
+                            raise LLMCancelled("请求已停止") from e
+                    else:
+                        time.sleep(attempt + 1)  # 1s、2s 退避
                     continue
                 raise
         raise last  # pragma: no cover
 
     def _once(self, req):
         """单次请求（socket 超时，无线程）。异常按「可否重试」分类。"""
+        owner = self
+
+        class TrackedHTTPConnection(http.client.HTTPConnection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                with owner._connection_lock:
+                    owner._active_connection = self
+                owner._raise_if_cancelled()
+
+        class TrackedHTTPSConnection(http.client.HTTPSConnection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                with owner._connection_lock:
+                    owner._active_connection = self
+                owner._raise_if_cancelled()
+
+        class TrackedHTTPHandler(urllib.request.HTTPHandler):
+            def http_open(self, request):
+                return self.do_open(TrackedHTTPConnection, request)
+
+        class TrackedHTTPSHandler(urllib.request.HTTPSHandler):
+            def https_open(self, request):
+                return self.do_open(
+                    TrackedHTTPSConnection, request,
+                    context=self._context,
+                )
+
+        opener = urllib.request.build_opener(TrackedHTTPHandler, TrackedHTTPSHandler)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with opener.open(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+        except LLMCancelled:
+            raise
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
             raise LLMError(f"HTTP {e.code}: {detail[:500]}")
         except urllib.error.URLError as e:
+            if self._cancel_event is not None and self._cancel_event.is_set():
+                raise LLMCancelled("请求已停止") from e
             # URLError 包装 socket.timeout 时 reason 是 TimeoutError 实例
             if isinstance(getattr(e, "reason", None), TimeoutError):
                 raise _RetryableError(f"请求超时（>{self.timeout}s）")
             raise _RetryableError(f"网络错误: {e.reason}")
         except TimeoutError:
+            if self._cancel_event is not None and self._cancel_event.is_set():
+                raise LLMCancelled("请求已停止")
             raise _RetryableError(f"请求超时（>{self.timeout}s）")
         except json.JSONDecodeError:
             raise LLMError("响应不是合法 JSON")
-        except OSError as e:
+        except (OSError, http.client.HTTPException) as e:
+            if self._cancel_event is not None and self._cancel_event.is_set():
+                raise LLMCancelled("请求已停止") from e
             raise _RetryableError(f"网络异常: {e}")
+        finally:
+            with self._connection_lock:
+                connection = self._active_connection
+                self._active_connection = None
+            if connection is not None:
+                connection.close()
         try:
             return data["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):

@@ -11,6 +11,11 @@
 
 ## 最近的项目状态
 
+- 最近新增了本机 Web 工作台：入口/后端会话逻辑在 `hackmate/webui.py`，页面布局、样式和前端交互在 `hackmate/web/index.html`，启动说明在 `README.md`。工作台复用 HackMate 的 LLM 客户端、工具注册表和 CDP 会话；聊天、行动记录和目标树保存在当前进程内。
+- Web 工作台左侧增加了站点结构排序和 Recon。Recon 的入口是 `WebSession.start_recon()`，同源爬取逻辑在 `_run_recon()`，HTTP 路由是 `POST /api/recon`；前端状态和按钮逻辑在 `hackmate/web/index.html` 的 `renderRecon()` 与 `reconButton` 事件处理器。它读取 HTML 中的 `<a href>`，使用同源 GET 请求，尊重 `robots.txt`，最多检查 300 页、深度 8；不执行 JavaScript，因此不会发现 `window.location.href` 动态路由，也不提交表单或扫描参数。URL 查询部分不显示在结构树中。
+- 接手 Web 工作台时无需重写；先看 `README.md`、`hackmate/webui.py`、`hackmate/web/index.html` 和当前 `git status` / diff。后续若继续增加工具或扩大前端功能，可考虑把爬取逻辑、HTTP 会话和静态 CSS/JS 拆分；这只是可选整理，不是当前继续开发的前置条件。
+- 修改 Web 工作台代码后需重启已运行的 HackMate 进程，才能加载新的后端路由和会话代码。已有 UI 进程可能仍在运行旧版本。
+- 最近这组 Web 工作台 / Recon 变更尚未有自动化或真实浏览器端到端验证；接手时应先检查当前 diff，再按用户需要决定验证范围。
 - 本次工作区最近讨论了让浏览器工具复用专用测试标签，避免每个测试步骤都新开页面。相关实现改动涉及 `hackmate/cdp.py`、`hackmate/tools.py`、`hackmate/grader.py`、`hackmate/repl.py`，README 中也有对应说明。
 - 曾对改动涉及的 Python 文件做静态语法解析，解析通过；没有进行自动化测试或真实浏览器验证。接手时应先查看当前 diff，再决定是否需要验证。
 - 用户曾要求撤销 `/clear` 相关改动；不要仅凭旧对话摘要重新加入这类改动，应以当前代码为准。

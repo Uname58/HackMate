@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HackMate · 工作台</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080d14;
+      --panel: #0e1722;
+      --panel-2: #121e2b;
+      --panel-3: #172434;
+      --line: #243246;
+      --muted: #8c9bb0;
+      --text: #e8eff8;
+      --green: #62e0ad;
+      --blue: #81c2ff;
+      --amber: #f3c477;
+      --purple: #c2a2ff;
+      --shadow: 0 18px 42px #0005;
+    }
+    * { box-sizing: border-box; }
+    ::selection { color: #07130f; background: #62e0ad; }
+    * { scrollbar-color: #33465d transparent; scrollbar-width: thin; }
+    body {
+      margin: 0;
+      min-width: 520px;
+      min-height: 100vh;
+      overflow-x: hidden;
+      overflow-y: auto;
+      color: var(--text);
+      background: radial-gradient(ellipse at 50% -28%, #193047 0, transparent 52%), var(--bg);
+      font: 13px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .topbar {
+      height: 58px; flex: 0 0 58px; display: flex; align-items: center;
+      justify-content: space-between; padding: 0 22px; border-bottom: 1px solid #29384c;
+      background: linear-gradient(100deg, #111b28f2, #0b121df2 65%, #111a27f2);
+      box-shadow: 0 5px 22px #0003; position: relative; z-index: 2;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; font-weight: 750; letter-spacing: .25px; }
+    .logo {
+      width: 31px; height: 31px; display: grid; place-items: center; border-radius: 10px;
+      color: #07130f; background: linear-gradient(145deg, #8af0c7, #45c997); font-weight: 900; font-size: 17px;
+      box-shadow: 0 0 22px #59d6a144, inset 0 1px #ffffff70;
+    }
+    .brand small { color: #8696ac; font-size: 10px; font-weight: 600; letter-spacing: .8px; margin-left: 6px; text-transform: uppercase; }
+    .top-right { display: flex; align-items: center; gap: 16px; color: var(--muted); font-size: 11px; }
+    .connection { display: flex; gap: 7px; align-items: center; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px #62e0ad99; }
+    .dot.offline { background: #75849a; box-shadow: none; }
+    .avatar { width: 29px; height: 29px; border: 1px solid #34465d; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(145deg, #293c53, #1a293a); color: #d5e5f5; font-size: 10px; font-weight: 750; }
+    .workspace { flex: 1 0 auto; min-height: 80vh; display: grid; grid-template-columns: 248px minmax(420px, 1fr) 292px; background: #0b121c; }
+    .sidebar, .tools { min-height: 0; background: linear-gradient(180deg, #111b28, #0e1722 58%); }
+    .sidebar { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+    .tools { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+    .section-head { height: 54px; flex: 0 0 54px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid #233144; background: #111b28a8; }
+    .section-title { color: #bac8d9; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .head-action { width: 28px; height: 28px; color: #91a1b7; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 4px; cursor: default; transition: .18s ease; }
+    .head-action:hover { color: #e0ebf6; border-color: #33465e; background: #1a2939; }
+    .target-card { margin: 14px 12px 12px; border: 1px solid #2d4257; background: linear-gradient(145deg, #182838, #121e2b); border-radius: 11px; padding: 12px; box-shadow: inset 0 1px #ffffff08, 0 8px 22px #0002; }
+    .target-label { font-size: 9px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; color: #8497ad; margin-bottom: 7px; }
+    .target-url { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; }
+    .target-url span { color: var(--green); }
+    .target-meta { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 9px; border-top: 1px solid #ffffff10; color: #8c9bb0; font-size: 10px; }
+    .tree { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 8px 12px; }
+    .tree-row { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 7px; color: #aab8ca; white-space: nowrap; transition: background .16s ease, color .16s ease; }
+    .tree-row:hover { color: #e0ebf6; background: #ffffff08; }
+    .tree-row.root { color: #dce6f1; font-weight: 700; }
+    .tree-row.indent { padding-left: 28px; }
+    .tree-row.selected { color: #e9f3ff; background: linear-gradient(90deg, #1a3244, #152638); box-shadow: inset 2px 0 var(--blue); }
+    .tree-row .chev { width: 10px; color: #8495aa; }
+    .tree-row .path { overflow: hidden; text-overflow: ellipsis; }
+    .tree-row .count { margin-left: auto; color: #718097; font-size: 10px; }
+    .file-icon { color: var(--blue); font-size: 11px; }
+    .folder-icon { color: #e4bd78; font-size: 10px; }
+    .empty-tree { padding: 8px 12px; color: #718097; font-size: 11px; }
+    .sidebar-actions { padding: 11px 12px 10px; border-top: 1px solid #233144; background: #0b131e88; }
+    .recon-button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #347057; border-radius: 10px; color: #dcf8ec; background: linear-gradient(135deg, #1b3a30, #14291f); box-shadow: inset 0 1px #ffffff0b, 0 5px 15px #0002; text-align: left; cursor: pointer; transition: .18s ease; }
+    .recon-button:hover:not(:disabled) { border-color: #57a77e; background: linear-gradient(135deg, #234a39, #183426); transform: translateY(-1px); }
+    .recon-button:disabled { cursor: default; opacity: .7; }
+    .recon-glyph { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; border: 1px solid #448363; border-radius: 9px; color: #8cf0bd; background: #1b4030; font-size: 16px; }
+    .recon-copy { min-width: 0; flex: 1; }
+    .recon-copy b, .recon-copy small { display: block; }
+    .recon-copy b { font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+    .recon-copy small { margin-top: 2px; color: #9ab6a7; font-size: 9px; }
+    .recon-state { color: #a5d5ba; font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .recon-button.running .recon-glyph { animation: recon-pulse 1.2s ease-in-out infinite; }
+    @keyframes recon-pulse { 50% { box-shadow: 0 0 0 5px #62e0ad16; } }
+    .tree-footer { padding: 10px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; display: flex; justify-content: space-between; background: #0b131e88; }
+    .center { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: radial-gradient(ellipse at 50% 0, #13223588, transparent 55%), #0b111a; }
+    .activity-panel { height: 40vh; flex: 0 0 40vh; min-height: 0; display: flex; flex-direction: column; }
+    .activity-head { height: 54px; flex: 0 0 54px; display: flex; align-items: center; justify-content: space-between; padding: 0 21px; border-bottom: 1px solid #263447; background: linear-gradient(90deg, #121d2a, #101925); }
+    .activity-name { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 750; letter-spacing: .15px; }
+    .activity-name .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 11px #62e0ad80; }
+    .run-state { padding: 5px 9px; color: #78e7ba; border: 1px solid #2e5a4a; border-radius: 999px; background: #16312788; font-size: 10px; font-weight: 700; letter-spacing: .15px; }
+    .run-state.idle { color: #97a7bb; border-color: #344256; background: #172130; }
+    .activity-log { flex: 1; min-height: 0; overflow: auto; padding: 20px 22px 24px; }
+    .day-label { display: flex; align-items: center; gap: 12px; margin-bottom: 19px; color: #8192a8; font-size: 9px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+    .day-label:before, .day-label:after { content: ""; height: 1px; background: linear-gradient(90deg, transparent, #304056); flex: 1; }
+    .day-label:after { transform: rotate(180deg); }
+    .event { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 11px; padding: 2px 8px 16px; border-radius: 9px; transition: background .16s ease; }
+    .event:hover { background: #ffffff05; }
+    .event:not(:last-child):before { content: ""; position: absolute; left: 20px; top: 26px; bottom: 0; width: 1px; background: linear-gradient(#33465d, #263447); }
+    .event-icon { width: 25px; height: 25px; z-index: 1; display: grid; place-items: center; border: 1px solid #33465c; border-radius: 8px; background: linear-gradient(145deg, #19283a, #111b28); color: var(--blue); font-size: 11px; box-shadow: 0 3px 9px #0002; }
+    .event-icon.green { color: var(--green); }
+    .event-icon.amber { color: var(--amber); }
+    .event-icon.purple { color: var(--purple); }
+    .event-icon.failed { color: #ff9b9b; border-color: #754449; background: #301e25; }
+    .event-body { min-width: 0; padding-top: 2px; }
+    .event-title { color: #e0e9f4; font-size: 12px; font-weight: 600; }
+    .event-detail { margin-top: 5px; color: #91a0b4; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+    .event-detail code { color: #a9d0f7; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .workspace-output { margin: 9px 0 0; padding: 11px 13px; overflow: auto; color: #c5d1df; background: linear-gradient(145deg, #131f2d, #101923); border: 1px solid #2c3b50; border-radius: 9px; box-shadow: inset 0 1px #ffffff08; font: 11px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .empty-activity { margin: 16px 0; padding: 34px 14px; color: #8697ad; border: 1px dashed #34445a; border-radius: 12px; background: #111a2580; text-align: center; font-size: 11px; line-height: 1.9; white-space: pre-line; }
+    .event-time { color: #8190a4; font-size: 9px; padding-top: 5px; font-variant-numeric: tabular-nums; }
+    .result-chip { display: inline-flex; align-items: center; gap: 5px; margin-top: 7px; padding: 4px 8px; color: #81e8bb; background: #17382d; border: 1px solid #2e644c; border-radius: 999px; font-size: 10px; }
+    .chat { min-height: 40vh; flex: 1 1 40vh; margin-top: 0; display: flex; flex-direction: column; border-top: 1px solid #2d3c50; background: linear-gradient(180deg, #111b28, #0e1722 50%); }
+    .chat-head { height: 46px; flex: 0 0 46px; display: flex; align-items: center; justify-content: space-between; padding: 0 19px; color: #a9b7ca; font-size: 11px; }
+    .chat-head strong { color: #e2ebf5; font-size: 12px; font-weight: 750; }
+    .chat-head-actions { display: flex; align-items: center; gap: 10px; }
+    .stop-task { padding: 6px 10px; color: #ffaaaa; border: 1px solid #75434a; border-radius: 7px; background: linear-gradient(145deg, #3a252c, #291b22); font-size: 10px; font-weight: 700; cursor: pointer; transition: .18s ease; }
+    .stop-task:not(:disabled):hover { color: #fff; border-color: #a95d65; background: #512b34; }
+    .stop-task:disabled { cursor: default; opacity: .42; }
+    .chat-history { flex: 1; min-height: 0; overflow: auto; padding: 0 19px 10px; }
+    .message { display: flex; gap: 9px; align-items: flex-start; margin: 7px 0 12px; font-size: 11px; }
+    .message .who { flex: 0 0 52px; padding-top: 8px; color: #9bcaff; font-size: 10px; font-weight: 750; }
+    .message.assistant .who { color: #75e2b5; }
+    .message .say { min-width: 0; padding: 8px 11px; color: #c8d4e2; border: 1px solid #2c3a4d; border-radius: 4px 11px 11px 11px; background: #172230; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+    .message.assistant .say { border-color: #264739; background: linear-gradient(145deg, #14251f, #13201e); }
+    .composer { display: flex; gap: 9px; padding: 10px 15px 13px; border-top: 1px solid #233247; background: #0c141eaa; }
+    .composer input { min-width: 0; flex: 1; padding: 11px 13px; color: #e3ebf5; border: 1px solid #34445a; outline: none; border-radius: 9px; background: #0a121c; box-shadow: inset 0 1px 4px #0003; transition: border-color .18s ease, box-shadow .18s ease; }
+    .composer input:focus { border-color: #4e9d84; box-shadow: 0 0 0 3px #59d6a11c; }
+    .composer input::placeholder { color: #73849a; }
+    .send { min-width: 76px; border: 1px solid #69d9ad; border-radius: 9px; padding: 0 15px; color: #082016; background: linear-gradient(145deg, #7aebbd, #4bc999); box-shadow: 0 5px 16px #47c99424, inset 0 1px #ffffff8a; font-weight: 800; cursor: pointer; transition: transform .16s ease, filter .16s ease; }
+    .send:not(:disabled):hover { filter: brightness(1.07); transform: translateY(-1px); }
+    .send:disabled { cursor: wait; opacity: .58; }
+    .tools-scroll { overflow: auto; padding: 14px 12px; }
+    .tool-group-label { margin: 2px 3px 9px; color: #75849a; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .tool-card { display: flex; gap: 11px; align-items: center; margin-bottom: 9px; padding: 11px; border: 1px solid #2a394d; border-radius: 10px; background: linear-gradient(145deg, #172332, #121b27); box-shadow: inset 0 1px #ffffff07; transition: border-color .18s ease, transform .18s ease, background .18s ease; }
+    .tool-card[role="button"] { width: 100%; color: inherit; text-align: left; cursor: pointer; }
+    .tool-card[role="button"]:hover { border-color: #4a617c; background: linear-gradient(145deg, #1b2b3d, #142131); transform: translateY(-1px); }
+    .tool-card.active { border-color: #39745b; background: linear-gradient(145deg, #193329, #14251f); box-shadow: 0 0 0 1px #59d6a115, inset 0 1px #ffffff0b; }
+    .tool-icon { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; border: 1px solid #315644; border-radius: 10px; color: var(--green); background: linear-gradient(145deg, #204031, #172b23); font-size: 16px; }
+    .tool-icon.blue { color: var(--blue); border-color: #304b68; background: linear-gradient(145deg, #20374f, #172839); }
+    .tool-icon.purple { color: var(--purple); border-color: #4b3d6d; background: linear-gradient(145deg, #332a4b, #211d31); }
+    .tool-info { min-width: 0; flex: 1; }
+    .tool-name { color: #e0e9f3; font-size: 11px; font-weight: 750; }
+    .tool-desc { margin-top: 4px; color: #8b9bb0; font-size: 9px; line-height: 1.5; }
+    .tool-status { padding: 3px 6px; color: #95a4b8; border: 1px solid #344257; border-radius: 999px; background: #111a25; font-size: 9px; white-space: nowrap; }
+    .tool-status.ready { color: var(--green); }
+    .tool-placeholder { margin-top: 15px; border: 1px dashed #3a4c62; border-radius: 10px; padding: 14px 12px; color: #8b9bb0; background: #101a26a6; text-align: center; font-size: 10px; }
+    .tool-placeholder b { display: block; margin-bottom: 4px; color: #c1cede; font-size: 11px; font-weight: 700; }
+    .tool-placeholder span { display: block; }
+    .bottom-status { min-height: 28px; flex: 0 0 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; color: #8292a7; border-top: 1px solid #263447; background: #0b121b; font-size: 9px; }
+    .status-left { display: flex; gap: 16px; }
+    :focus-visible { outline: 2px solid #62e0ad; outline-offset: 2px; }
+    @media (max-height: 720px) { .activity-log { padding-top: 12px; } }
+    @media (max-width: 1100px) {
+      .workspace { grid-template-columns: 210px minmax(340px, 1fr) 235px; }
+      .tools-scroll { padding-left: 9px; padding-right: 9px; }
+    }
+    @media (max-width: 760px) {
+      .topbar { padding: 0 10px; }
+      .top-right { gap: 8px; }
+      #current-target, .avatar { display: none; }
+      .workspace { grid-template-columns: minmax(138px, .9fr) minmax(250px, 1.8fr) minmax(138px, .9fr); }
+      .section-head { padding: 0 9px; }
+      .target-card { margin: 9px 7px; padding: 8px; }
+      .target-url { gap: 4px; font-size: 10px; overflow-wrap: anywhere; }
+      .target-meta { display: none; }
+      .tree { padding-left: 4px; padding-right: 4px; }
+      .tree-row { gap: 4px; padding-right: 4px; font-size: 10px; }
+      .tree-row.root { font-size: 10px; }
+      .tree-row .count { font-size: 9px; }
+      .tree-footer { padding: 9px 7px; font-size: 9px; }
+      .sidebar-actions { padding: 8px 7px; }
+      .recon-button { gap: 6px; padding: 7px; }
+      .recon-glyph { width: 28px; height: 28px; flex-basis: 28px; }
+      .recon-copy b { font-size: 10px; }
+      .recon-copy small { font-size: 8px; }
+      .recon-state { font-size: 8px; }
+      .activity-head { padding: 0 10px; }
+      .activity-log { padding: 12px 9px; }
+      .event { grid-template-columns: 22px minmax(0, 1fr); gap: 7px; }
+      .event-time { display: none; }
+      .chat-head { padding: 0 10px; }
+      #chat-status { display: none; }
+      .chat-history { padding-left: 10px; padding-right: 10px; }
+      .message .who { flex-basis: 45px; }
+      .composer { padding-left: 8px; padding-right: 8px; }
+      .send { padding: 0 9px; }
+      .tools-scroll { padding: 10px 7px; }
+      .tool-card { gap: 6px; padding: 7px; }
+      .tool-icon { display: none; }
+      .tool-name { font-size: 10px; }
+      .tool-desc { display: none; }
+      .tool-status { display: none; }
+      .tool-placeholder { padding: 9px 6px; font-size: 9px; }
+      .bottom-status { padding: 0 7px; font-size: 9px; }
+      .status-left { gap: 7px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><div class="logo">H</div><span>HackMate <small>Security Workbench</small></span></div>
+      <div class="top-right"><div class="connection"><i class="dot" id="connection-dot"></i><span id="connection-text">正在连接本地工作台</span></div><span id="current-target">等待发现目标</span><div class="avatar">HM</div></div>
+    </header>
+    <main class="workspace">
+      <aside class="sidebar">
+        <div class="section-head"><span class="section-title">目标结构</span><button class="head-action">•••</button></div>
+        <div class="target-card" id="target-card">
+          <div class="target-label">当前目标</div>
+          <div class="target-url"><span>◉</span><span id="target-origin">尚未发现网站</span></div>
+          <div class="target-meta"><span>已观察页面</span><span id="target-count">0</span></div>
+        </div>
+        <div class="tree" id="site-tree">
+          <div class="empty-tree">CDP 连接后，显示已打开或 HackMate 访问过的页面。</div>
+        </div>
+        <div class="sidebar-actions">
+          <button class="recon-button" id="recon-button" type="button" disabled title="从当前目标开始扫描同源页面">
+            <span class="recon-glyph">⌕</span>
+            <span class="recon-copy"><b>Recon</b><small id="recon-description">扫描整个网站结构</small></span>
+            <span class="recon-state" id="recon-state">等待目标</span>
+          </button>
+        </div>
+        <div class="tree-footer"><span id="tree-source">页面来源 · CDP / HackMate</span><span id="cdp-status">CDP 未连接</span></div>
+      </aside>
+
+      <section class="center">
+        <section class="activity-panel">
+          <div class="activity-head">
+            <div class="activity-name"><i class="pulse"></i> 工作区</div>
+            <div class="run-state idle" id="run-state">● 等待消息</div>
+          </div>
+          <div class="activity-log" id="activity-log">
+            <div class="empty-activity">HackMate 使用工具后，行动步骤会显示在这里。<br>对话内容只会出现在下方聊天区。</div>
+          </div>
+        </section>
+        <section class="chat">
+          <div class="chat-head"><strong>与 HackMate 对话</strong><div class="chat-head-actions"><span id="chat-status">本次运行会话</span><button class="stop-task" id="stop-button" type="button" disabled>停止当前任务</button></div></div>
+          <div class="chat-history" id="chat-history"></div>
+          <form class="composer" id="chat-form"><input id="chat-input" aria-label="发送给 HackMate" autocomplete="off" placeholder="输入消息，和 HackMate 继续对话…"><button class="send" id="send-button" type="submit">发送 ↗</button></form>
+        </section>
+      </section>
+
+      <aside class="tools">
+        <div class="section-head"><span class="section-title">工具箱</span><button class="head-action" type="button" title="自定义工具入口尚未接入">＋</button></div>
+        <div class="tools-scroll" id="tool-list">
+          <div class="tool-placeholder"><b>正在读取工具状态…</b></div>
+        </div>
+      </aside>
+    </main>
+    <footer class="bottom-status"><div class="status-left"><span><i class="dot" id="footer-dot" style="display:inline-block;vertical-align:middle;margin-right:5px"></i><span id="footer-cdp">CDP 状态未知</span></span><span id="model-state">模型 · 连接中</span></div><span>本机工作台 · 对话和行动记录仅保存在本次运行</span></footer>
+  </div>
+  <script>
+    const chatHistory = document.getElementById('chat-history');
+    const activityLog = document.getElementById('activity-log');
+    const chatInput = document.getElementById('chat-input');
+    const sendButton = document.getElementById('send-button');
+    const chatStatus = document.getElementById('chat-status');
+    const stopButton = document.getElementById('stop-button');
+    const runState = document.getElementById('run-state');
+    const tree = document.getElementById('site-tree');
+    const reconButton = document.getElementById('recon-button');
+    const reconState = document.getElementById('recon-state');
+    const reconDescription = document.getElementById('recon-description');
+    let selectedTool = '';
+    let availableTargets = [];
+    let currentRecon = { running: false };
+    let reconAvailable = false;
+    let lastChatCount = -1;
+    let lastActionSignature = '';
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function renderChat(messages, busy, cancelRequested) {
+      if (messages.length !== lastChatCount) {
+        chatHistory.replaceChildren();
+        messages.forEach(message => {
+          const row = el('div', 'message' + (message.role === 'assistant' ? ' assistant' : ''));
+          row.append(el('span', 'who', message.role === 'user' ? '你' : 'HackMate'));
+          row.append(el('span', 'say', message.content));
+          chatHistory.append(row);
+        });
+        lastChatCount = messages.length;
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+      }
+      chatStatus.textContent = cancelRequested ? '正在停止…' : busy ? 'HackMate 正在回复…' : '本次运行会话';
+      sendButton.disabled = busy;
+      sendButton.textContent = busy ? '处理中…' : '发送 ↗';
+      stopButton.disabled = !busy || cancelRequested;
+      stopButton.textContent = cancelRequested ? '正在停止…' : '停止当前任务';
+    }
+
+    function actionResult(action) {
+      if (!action.result) return '';
+      if (action.name === 'verify_xss') {
+        try {
+          const data = JSON.parse(action.result);
+          return (data.status ? data.status + ' · ' : '') + (data.evidence || data.reason || '');
+        } catch (_) { /* 显示原始工具结果 */ }
+      }
+      return action.result;
+    }
+
+    function renderActions(actions, busy) {
+      const signature = JSON.stringify(actions);
+      if (signature !== lastActionSignature) {
+        activityLog.replaceChildren();
+        if (!actions.length) {
+          activityLog.append(el('div', 'empty-activity', 'HackMate 使用工具后，行动步骤会显示在这里。\n对话内容只会出现在下方聊天区。'));
+        } else {
+          const day = el('div', 'day-label', '本次运行 · 行动时间线');
+          activityLog.append(day);
+          actions.forEach(action => {
+            const row = el('div', 'event');
+            const statusClass = action.status === 'failed' ? ' failed' : action.status === 'confirmed' ? ' green' : action.name === 'load_skill' ? ' purple' : '';
+            row.append(el('div', 'event-icon' + statusClass, action.icon));
+            const body = el('div', 'event-body');
+            body.append(el('div', 'event-title', action.label + (action.detail && action.name === 'load_skill' ? ' ' + action.detail : '')));
+            if (action.detail && action.name !== 'load_skill') {
+              const detail = el('div', 'event-detail');
+              detail.append(el('code', '', action.detail));
+              body.append(detail);
+            }
+            const result = actionResult(action);
+            if (result) {
+              if (action.name === 'help') body.append(el('pre', 'workspace-output', result));
+              else body.append(el('div', action.status === 'confirmed' ? 'result-chip' : 'event-detail', result));
+            }
+            if (action.status === 'running' && !result) body.append(el('div', 'event-detail', '执行中…'));
+            row.append(body, el('div', 'event-time', action.time));
+            activityLog.append(row);
+          });
+        }
+        lastActionSignature = signature;
+        activityLog.scrollTop = activityLog.scrollHeight;
+      }
+      runState.textContent = busy ? '● 正在运行' : (actions.some(a => a.status === 'running') ? '● 正在执行工具' : '● 等待消息');
+      runState.classList.toggle('idle', !busy && !actions.some(a => a.status === 'running'));
+    }
+
+    function renderTree(targets, cdpConnected) {
+      tree.replaceChildren();
+      availableTargets = targets;
+      if (!targets.length) {
+        tree.append(el('div', 'empty-tree', cdpConnected ? '已连接 CDP；访问页面后会逐步建立站点树。' : 'CDP 连接后，显示已打开或 HackMate 实际访问过的页面。'));
+      }
+      let pageCount = 0;
+      targets.forEach(target => {
+        const root = el('div', 'tree-row root');
+        root.append(el('span', 'chev', '⌄'), el('span', '', '🌐'), el('span', 'path', target.host), el('span', 'count', String(target.pages.length)));
+        tree.append(root);
+        const pathRoot = { children: new Map(), page: null, path: '/' };
+        target.pages.forEach(page => {
+          pageCount += 1;
+          const segments = page.path.split('/').filter(Boolean);
+          let node = pathRoot;
+          let path = '';
+          segments.forEach(segment => {
+            path += '/' + segment;
+            if (!node.children.has(segment)) node.children.set(segment, { children: new Map(), page: null, path });
+            node = node.children.get(segment);
+          });
+          node.page = page;
+        });
+
+        const addPageRow = page => {
+          const row = el('div', 'tree-row page-row');
+          row.style.paddingLeft = '28px';
+          row.title = page.url;
+          row.append(el('span', 'chev', '·'), el('span', 'file-icon', '◇'), el('span', 'path', '/'));
+          row.addEventListener('click', () => {
+            tree.querySelectorAll('.page-row.selected').forEach(node => node.classList.remove('selected'));
+            row.classList.add('selected');
+          });
+          tree.append(row);
+        };
+        if (pathRoot.page) addPageRow(pathRoot.page);
+
+        const renderNodes = (parent, depth) => {
+          const names = Array.from(parent.children.keys()).sort((a, b) =>
+            a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+          names.forEach(name => {
+            const node = parent.children.get(name);
+            const hasChildren = node.children.size > 0;
+            const row = el('div', 'tree-row ' + (node.page ? 'page-row' : 'folder-row'));
+            row.style.paddingLeft = (15 + Math.min(depth, 6) * 13) + 'px';
+            row.title = node.page ? node.page.url : target.origin + node.path;
+            const label = node.page ? (node.page.path.endsWith('/') ? name + '/' : name) : name + '/';
+            row.append(el('span', 'chev', hasChildren ? '⌄' : '·'),
+              el('span', node.page ? 'file-icon' : 'folder-icon', node.page ? '◇' : '▰'),
+              el('span', 'path', label));
+            if (node.page) row.addEventListener('click', () => {
+              tree.querySelectorAll('.page-row.selected').forEach(item => item.classList.remove('selected'));
+              row.classList.add('selected');
+            });
+            tree.append(row);
+            if (hasChildren) renderNodes(node, depth + 1);
+          });
+        };
+        renderNodes(pathRoot, 1);
+      });
+      const first = targets[0];
+      document.getElementById('target-origin').textContent = first ? first.origin : '尚未发现网站';
+      document.getElementById('current-target').textContent = first ? first.host : '等待发现目标';
+      document.getElementById('target-count').textContent = pageCount + ' 个页面';
+      reconButton.disabled = !first || !reconAvailable || currentRecon.running;
+    }
+
+    function renderRecon(recon) {
+      reconAvailable = Boolean(recon);
+      if (!reconAvailable) {
+        currentRecon = { running: false };
+        reconButton.disabled = true;
+        reconState.textContent = '需重启';
+        reconDescription.textContent = '重启 HackMate 后启用';
+        reconButton.title = '此 Recon 功能需要重启 HackMate 工作台';
+        return;
+      }
+      currentRecon = recon || { running: false };
+      const running = Boolean(currentRecon.running);
+      reconButton.classList.toggle('running', running);
+      reconButton.disabled = !availableTargets.length || running;
+      reconState.textContent = running
+        ? currentRecon.visited + ' 页'
+        : currentRecon.found ? currentRecon.found + ' 条' : (availableTargets.length ? '开始' : '待目标');
+      reconDescription.textContent = running
+        ? '正在枚举同源页面…'
+        : currentRecon.error ? '上次扫描失败' : '扫描整个网站结构';
+      reconButton.title = currentRecon.error || '扫描当前目标站点的页面结构（最多 300 页）';
+    }
+
+    function renderTools(tools) {
+      const root = document.getElementById('tool-list');
+      root.replaceChildren();
+      let groupName = '';
+      tools.forEach(tool => {
+        if (tool.group !== groupName) {
+          groupName = tool.group;
+          const label = el('div', 'tool-group-label', groupName);
+          if (root.childElementCount) label.style.marginTop = '18px';
+          root.append(label);
+        }
+        const card = el('div', 'tool-card' + (selectedTool === tool.id ? ' active' : ''));
+        card.setAttribute('role', 'button');
+        card.tabIndex = 0;
+        const iconClass = tool.id === 'xsstrike' ? ' blue' : tool.id === 'hackmate' ? ' purple' : '';
+        card.append(el('div', 'tool-icon' + iconClass, tool.id === 'traffic' ? '⇄' : tool.id === 'xsstrike' ? '⌁' : '⌘'));
+        const info = el('div', 'tool-info');
+        info.append(el('div', 'tool-name', tool.name), el('div', 'tool-desc', tool.description));
+        card.append(info, el('span', 'tool-status' + (tool.status === '可用' ? ' ready' : ''), tool.status));
+        const selectTool = () => {
+          selectedTool = tool.id;
+          root.querySelectorAll('.tool-card').forEach(node => node.classList.remove('active'));
+          card.classList.add('active');
+          const note = root.querySelector('.tool-selection');
+          if (note) note.remove();
+          const selected = el('div', 'tool-placeholder tool-selection');
+          selected.append(el('b', '', tool.name), el('span', '', tool.status === '可用' ? '此工具通过 HackMate 对话调用。' : '工具入口已预留；当前版本尚未接入执行适配器。'));
+          root.append(selected);
+        };
+        card.addEventListener('click', selectTool);
+        card.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectTool();
+          }
+        });
+        root.append(card);
+      });
+      if (!tools.some(tool => tool.id === 'traffic')) root.append(el('div', 'tool-placeholder', '添加自定义工具'));
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/api/state', { cache: 'no-store' });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const state = await response.json();
+        renderChat(state.chat, state.busy, state.cancel_requested);
+        renderActions(state.actions, state.busy);
+        renderTree(state.targets, state.cdp_connected);
+        renderRecon(state.recon);
+        if (state.tools) renderToolsIfNeeded(state.tools);
+        const connected = state.cdp_connected;
+        document.getElementById('connection-text').textContent = connected ? 'CDP 已连接' : '等待 Chrome CDP';
+        document.getElementById('connection-dot').classList.toggle('offline', !connected);
+        document.getElementById('footer-dot').classList.toggle('offline', !connected);
+        document.getElementById('cdp-status').textContent = connected ? 'CDP 已连接' : 'CDP 未连接';
+        document.getElementById('footer-cdp').textContent = connected ? 'CDP 已连接' : 'CDP 未连接';
+        document.getElementById('model-state').textContent = state.configured ? '模型 · ' + state.model : '模型 · 未配置 API Key';
+      } catch (error) {
+        document.getElementById('connection-text').textContent = '工作台连接中断';
+        document.getElementById('chat-status').textContent = error.message;
+      }
+    }
+
+    let lastToolsJson = '';
+    function renderToolsIfNeeded(tools) {
+      const value = JSON.stringify(tools);
+      if (value !== lastToolsJson) {
+        renderTools(tools);
+        lastToolsJson = value;
+      }
+    }
+
+    document.getElementById('chat-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const text = chatInput.value.trim();
+      if (!text) return;
+      sendButton.disabled = true;
+      chatInput.value = '';
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          chatInput.value = text;
+          chatStatus.textContent = data.error || '发送失败';
+        }
+      } catch (error) {
+        chatInput.value = text;
+        chatStatus.textContent = '无法连接工作台';
+      }
+      chatInput.focus();
+      refresh();
+    });
+
+    stopButton.addEventListener('click', async () => {
+      stopButton.disabled = true;
+      stopButton.textContent = '正在停止…';
+      chatStatus.textContent = '正在停止…';
+      try {
+        const response = await fetch('/api/stop', { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok) chatStatus.textContent = data.error || '停止失败';
+      } catch (_) {
+        chatStatus.textContent = '无法连接工作台';
+      }
+      refresh();
+    });
+
+    reconButton.addEventListener('click', async () => {
+      if (!reconAvailable || !availableTargets.length) return;
+      reconButton.disabled = true;
+      reconState.textContent = '启动中';
+      reconDescription.textContent = '正在准备扫描…';
+      try {
+        const response = await fetch('/api/recon', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ origin: availableTargets[0].origin })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Recon 启动失败');
+      } catch (error) {
+        reconDescription.textContent = error.message;
+        reconButton.disabled = false;
+      }
+      refresh();
+    });
+
+    chatInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        document.getElementById('chat-form').requestSubmit();
+      }
+    });
+    refresh();
+    setInterval(refresh, 900);
+  </script>
+</body>
+</html>

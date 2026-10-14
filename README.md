@@ -11,6 +11,7 @@ AI 渗透测试副驾驶（human-in-the-loop）。人类主导，AI 辅助侦察
 pip install websocket-client      # 唯一第三方依赖（CDP 读 DOM）
 cp .env.example .env              # 填 HACKMATE_API_KEY
 python chat.py                    # 进入对话
+python chat.py web                # 启动本机 Web 工作台（http://127.0.0.1:8765）
 ```
 
 ## 命令
@@ -22,7 +23,10 @@ python chat.py cdp        # 列出 Chrome 页面
 python chat.py memory     # 查看偏好 + 项目状态
 ```
 
-对话内：`/help` `/clear` `/stop` `/cdp` `/cdp read N` `/guide` `/skill` `/memory` `/log` `/log steps`
+Web 工作台复用同一套 HackMate 对话与工具。左侧显示 CDP 已打开或 HackMate 实际访问过的 HTTP(S) 页面，中间上方显示工具行动记录、下方仅显示你和 HackMate 的对话，右侧列出工具入口。抓包/修改包和 XSStrike 当前是界面占位项，尚未接入执行功能。
+在 GUI 输入 `/help` 会把帮助内容显示在中间工作区；输入 `/web` 会提示当前已在工作台中。GUI 暂不支持的 CLI 命令会在工作区提示，且不会发送给模型。
+
+对话内：`/help` `/clear` `/stop` `/web` `/cdp` `/cdp read N` `/guide` `/skill` `/memory` `/log` `/log steps`
 `/jobs` `/job N` `/cancel N` `/exit`
 
 - **`/guide`** —— AI 教学引导：读当前靶场页面 → LLM 现场生成针对性步骤 → 在调试 Chrome 里用一个
