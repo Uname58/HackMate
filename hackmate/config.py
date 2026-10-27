@@ -21,10 +21,12 @@ DEFAULTS = {
     "system_prompt": "You are a pentest copilot. Be concise, technical, and honest.",
     "cdp_host": "localhost",
     "cdp_port": 9222,
+    "mcp_servers": [],
 }
 
 # 这些 key 允许被 config 文件 / 环境变量覆盖
-_KEYS = ("api_key", "base_url", "model", "skill_model", "system_prompt", "cdp_host", "cdp_port")
+_KEYS = ("api_key", "base_url", "model", "skill_model", "system_prompt",
+         "cdp_host", "cdp_port", "mcp_servers")
 
 
 def app_root():

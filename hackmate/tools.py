@@ -66,8 +66,70 @@ def _h_save_case(args, ctx):
 
 
 def _h_load_skill(args, ctx):
-    content = skill.load_skill(args.get("vuln", ""))
-    return content if content else "没有该漏洞的知识"
+    content = skill.load_skill(args.get("vuln", ""), args.get("variant"))
+    return content if content else "没有该漏洞的知识（或该 variant 不存在）"
+
+
+def _h_run_tool(args, ctx):
+    """调用 vendor/ 里的白名单 CLI 工具（sqlmap/dalfox/commix...）。"""
+    import subprocess, shlex
+    from pathlib import Path
+    vendor_dir = Path(__file__).resolve().parent.parent / "vendor"
+    rp = vendor_dir / "tools.json"
+    if not rp.exists():
+        return "vendor/tools.json 不存在，工具清单未配置"
+    try:
+        registry = json.loads(rp.read_text(encoding="utf-8"))
+    except Exception as e:
+        return f"读 tools.json 失败：{e}"
+    tool = args.get("tool", "")
+    if tool not in registry:
+        return f"未知工具 '{tool}'。可用：{', '.join(registry)}"
+    t = registry[tool]
+    if not t.get("ready", False):
+        return f"工具 '{tool}' 未就绪：{t.get('note', '需配置依赖')}｜用途：{t.get('desc', '')}"
+    try:
+        cmd = shlex.split(t["entry"]) + shlex.split(args.get("args", ""))
+    except ValueError as e:
+        return f"参数解析失败：{e}"
+    try:
+        import os
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"  # Windows 原生 GBK 控制台编码不了 emoji/特殊字符
+        r = subprocess.run(cmd, cwd=str(vendor_dir), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", env=env, timeout=120)
+        out = (r.stdout or "") + ("\n[stderr]\n" + r.stderr if r.stderr else "")
+        if len(out) > 6000:
+            out = out[:6000] + "\n…[输出截断]"
+        return out.strip() or f"（无输出，退出码 {r.returncode}）"
+    except subprocess.TimeoutExpired:
+        return "（执行超时 120s，已终止）"
+    except Exception as e:
+        return f"（执行失败：{e}）"
+
+
+def _h_search_cve(args, ctx):
+    """查 CVE：调 NVD API 按组件/关键词搜。限流约 5s/次，别频繁调用。"""
+    import urllib.request, urllib.parse
+    keyword = args.get("keyword") or args.get("component", "")
+    if not keyword:
+        return "需要 keyword 或 component 参数"
+    url = ("https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch="
+           + urllib.parse.quote(keyword) + "&resultsPerPage=10")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        return f"（CVE 查询失败：{e}）"
+    vulns = data.get("vulnerabilities", [])
+    if not vulns:
+        return f"未找到与 '{keyword}' 相关的 CVE"
+    lines = [f"与 '{keyword}' 相关的 CVE（前 {len(vulns)} 条）："]
+    for v in vulns:
+        cve = v.get("cve", {})
+        desc = (cve.get("descriptions", [{}])[0].get("value", "") or "")[:120]
+        lines.append(f"- {cve.get('id', '?')}: {desc}")
+    return "\n".join(lines)
 
 
 def _h_improve_skill(args, ctx):
@@ -190,9 +252,30 @@ REGISTRY = [
     },
     {
         "name": "load_skill",
-        "description": "读某类漏洞的完整知识（测试方法/绕过手法/坑），注入上下文",
-        "parameters": _obj({"vuln": {"type": "string", "description": "漏洞大类，如 xss"}}, ["vuln"]),
+        "description": "按需读某类漏洞的知识。省略 variant 读该大类全部；指定 variant（如 reflection_xss）只读那一类，省上下文。打靶时根据 overview 判断类型后，只 load 对应的 variant，别一次读全部。",
+        "parameters": _obj({
+            "vuln": {"type": "string", "description": "漏洞大类，如 xss"},
+            "variant": {"type": "string", "description": "可选，子类型如 reflection_xss / dom_xss / stored_xss；省略读全部"},
+        }, ["vuln"]),
         "handler": _h_load_skill,
+    },
+    {
+        "name": "run_tool",
+        "description": "调用 vendor/ 里的白名单 CLI 工具（sqlmap/commix/fuxploider/blindx/4-zero-3 等），命令行参数直接传。调用前先看工具是否 ready。",
+        "parameters": _obj({
+            "tool": {"type": "string", "description": "工具名，如 sqlmap / commix / fuxploider / blindx / 4-zero-3"},
+            "args": {"type": "string", "description": "传给工具的命令行参数，如 '-u http://target?id=1 --batch'"},
+        }, ["tool"]),
+        "handler": _h_run_tool,
+    },
+    {
+        "name": "search_cve",
+        "description": "查 CVE 库：按组件名/关键词搜已知漏洞（NVD）。打 WordPress/已知组件时做版本→CVE 匹配。",
+        "parameters": _obj({
+            "keyword": {"type": "string", "description": "组件名或关键词，如 'WordPress plugin' / 'Apache Log4j'"},
+            "component": {"type": "string", "description": "组件名（同 keyword，二者给一个即可）"},
+        }),
+        "handler": _h_search_cve,
     },
     {
         "name": "improve_skill",
@@ -282,3 +365,49 @@ def dispatch(name, args, ctx):
         return t["handler"](args, ctx)
     except Exception as e:
         return f"工具执行错误: {e}"
+
+
+def _mcp_schema(tool):
+    """把 MCP 工具的 inputSchema（JSON Schema）转成 HackMate parameters 格式。"""
+    schema = tool.get("inputSchema") or {}
+    if schema.get("type") == "object" and "properties" in schema:
+        return schema
+    return {"type": "object", "properties": {}}
+
+
+def discover_mcp(cfg):
+    """连 cfg['mcp_servers'] 里配的 MCP 服务器，把其工具动态注册进 REGISTRY。
+
+    工具名统一加 mcp_<server>_<tool> 前缀（连字符/点转下划线，兼容 LLM API）。
+    连不上的服务器跳过，不影响其他 server 和内置工具。
+    返回 (成功连接的 server 数, 注册的工具数)。
+    """
+    servers = cfg.get("mcp_servers") or []
+    if not servers:
+        return 0, 0
+    from . import mcp_client as mcp
+    n_conn = n_tool = 0
+    for srv in servers:
+        name, command = srv.get("name", ""), srv.get("command", "")
+        if not name or not command:
+            continue
+        try:
+            c = mcp.MCPClient(name, command, srv.get("args", []),
+                              srv.get("env", {}), srv.get("timeout", 120))
+            tools = c.connect()
+            n_conn += 1
+            for t in tools:
+                tn = t.get("name", "")
+                full = f"mcp_{name}_{tn}".replace("-", "_").replace(".", "_")
+                REGISTRY.append({
+                    "name": full,
+                    "description": f"[MCP:{name}] {t.get('description', '')}",
+                    "parameters": _mcp_schema(t),
+                    "handler": (lambda a, ctx, _c=c, _tn=tn: _c.call(_tn, a)),
+                })
+                n_tool += 1
+        except Exception as e:
+            print(f"[MCP] 连 '{name}' 失败：{e}")
+    global _BY_NAME
+    _BY_NAME = {t["name"]: t for t in REGISTRY}
+    return n_conn, n_tool

@@ -12,3 +12,7 @@ evals/*/backups_split/
 skills/*/backups/
 .hackmate-chrome/
 tools/cdp/launcher/*.exe
+
+# 第三方工具（vendor/，git clone 下载，不进仓库）
+vendor/
+!vendor/tools.json

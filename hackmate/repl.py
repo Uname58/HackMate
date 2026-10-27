@@ -15,7 +15,7 @@ from pathlib import Path
 from .config import load_config
 from .llm import LLMClient, LLMError
 from .jobs import JobManager
-from .tools import ToolContext, schemas, dispatch
+from .tools import ToolContext, schemas, dispatch, discover_mcp
 from . import memory, skill, log
 
 BANNER = "HackMate v2 — AI 渗透情报副驾驶 (CLI)"
@@ -198,9 +198,9 @@ def _run_tool_loop(client, tool_schemas, ctx, resp, loaded_skill, max_iters=None
             if fn in _BATTLE_TOOLS and not loaded_skill:
                 parts = []
                 for v in skill.list_vulns():
-                    c = skill.load_skill(v)
+                    c = skill.load_overview(v)
                     if c:
-                        parts.append(f"[系统已自动加载 '{v}' 完整 skill 知识，后续打靶务必据此执行]\n{c}")
+                        parts.append(f"[系统已注入 '{v}' overview（总纲）。详细 variant 请按需 load_skill(vuln, variant) 读，别一次读全部]\n{c}")
                 if parts:
                     result = result + "\n\n" + "\n\n".join(parts)
                     loaded_skill = True
@@ -244,6 +244,7 @@ def chat_loop():
     system_prompt = build_system_prompt(cfg)
     client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], system_prompt)
     jobs = JobManager()
+    mcp_conn, mcp_tools = discover_mcp(cfg)  # 连外部 MCP 服务器，动态注册工具
     tool_schemas = schemas()
     loaded_skill = False  # 本会话是否已自动加载过 skill 知识（打靶前程序强制注入）
 

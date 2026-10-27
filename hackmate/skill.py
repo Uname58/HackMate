@@ -41,8 +41,9 @@ def _read(p: Path) -> str:
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
-def load_skill(vuln: str) -> str:
-    """读某 vuln 全部知识（overview + 各 variant + caution），拼成上下文。"""
+def load_skill(vuln: str, variant: str = "") -> str:
+    """读某 vuln 知识。variant 空 读 overview + 全部 variant + caution（全量，eval 判分用）；
+    variant 指定则只读 overview + 该 variant + caution（按需，打靶用）。"""
     d = vuln_dir(vuln)
     if not d.exists():
         return ""
@@ -50,14 +51,27 @@ def load_skill(vuln: str) -> str:
     overview = d / f"{vuln}.md"
     if overview.exists():
         parts.append(f"# {vuln.upper()} overview\n{_read(overview)}")
-    for f in sorted(d.glob("*.md")):
-        if f.name in (f"{vuln}.md", "caution.md"):
-            continue
-        parts.append(f"# {f.stem}\n{_read(f)}")
+    if variant:
+        vf = d / f"{variant}.md"
+        if not vf.exists():
+            return ""
+        parts.append(f"# {variant}\n{_read(vf)}")
+    else:
+        for f in sorted(d.glob("*.md")):
+            if f.name in (f"{vuln}.md", "caution.md"):
+                continue
+            parts.append(f"# {f.stem}\n{_read(f)}")
     caution = d / "caution.md"
     if caution.exists():
         parts.append(f"# caution（坑 / 预警）\n{_read(caution)}")
     return "\n\n".join(parts)
+
+
+def load_overview(vuln: str) -> str:
+    """只读某 vuln 的 overview（轻量总纲），供程序兜底注入；variant 详细靠 load_skill 按需读。"""
+    d = vuln_dir(vuln)
+    overview = d / f"{vuln}.md"
+    return f"# {vuln.upper()} overview\n{_read(overview)}" if overview.exists() else ""
 
 
 def get_variant_path(vuln: str, variant: str) -> Path:

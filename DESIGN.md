@@ -1,6 +1,42 @@
-# HackMate v2 — 设计方案
+# HackMate v4 — 设计方案
 
-> 从 0 重写。本文件是定稿设计 + 与 v1 的差异记录。
+> v4 在 v3（Web 工作台）基础上，砍「skill 只能自主生成」红线，扩多漏洞类型 + 工具编排 + 按需加载。
+> v2 的架构设计（后台 Job / 语义判分阶梯 / 自我进化闭环）仍有效，见下文「v2 设计」。
+
+## v4 设计（2026-10-22 定稿）
+
+### 三个根本变化（相对 v3）
+
+1. **砍「skill 只能自主 improve 生成」红线** —— 允许人工铺地基（嵌 src-hunter 多漏洞类型知识），
+   improve/eval 在这个地基上继续自主长。理由：自主 improve 只能从 save_case 的打靶里长出来，
+   XSS 之外的漏洞类型永远长不出，导致打 mystery lab / WordPress「找不到」。
+2. **skill 从「全量加载」→「按需加载」** —— 一个 vuln 全读进上下文的设计，吃不下 27 万行的
+   多漏洞知识。改成「路由表 + 按需 Read」：命中入口信号才翻对应 playbook。
+3. **工具层扩展（双轨）** —— REGISTRY 内置核心工具（CDP/recon）+ MCP 客户端接外部工具
+   （jshookmcp 等）+ vendor/ 第三方工具 adapter（sqlmap/dalfox/beef…）+ CVE 查询工具。
+
+### 三层蓝图
+
+- **知识层**：多漏洞类型 skill（嵌 src-hunter 19 类）+ 按需加载（路由表）
+- **工具层**：REGISTRY（内置）+ MCP（外部）+ vendor adapter（CLI 工具）+ CVE 查询（NVD / GitHub Advisory / WPScan）
+- **执行层**：LLM 自主调度「翻书 + 调工具 + 查 CVE」，串成攻击链
+
+### 开发顺序
+
+1. 按需加载（skill 路由表 + 按需 Read）
+2. 嵌知识（src-hunter 19 类 → skills/ 多漏洞类型地基）
+3. 接工具（vendor 9 工具 adapter + MCP 客户端 + CVE 查询）
+
+### vendor/ 第三方工具（2026-10-22 已下载）
+
+blindx / 4-zero-3 / waf-bypass / beef / dalfox / sqlmap / commix / fuxploider / phpsploit
+（`git clone --depth 1`，`.git` 已删，`.gitignore` 忽略，不进仓库）
+
+---
+
+## v2 设计（历史定稿，仍有效）
+
+> 从 0 重写。本文件是 v2 定稿设计 + 与 v1 的差异记录。
 
 ## 0. 总纲
 
