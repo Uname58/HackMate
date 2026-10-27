@@ -12,6 +12,9 @@
 ## 最近的项目状态
 
 - 最近新增了本机 Web 工作台：入口/后端会话逻辑在 `hackmate/webui.py`，页面布局、样式和前端交互在 `hackmate/web/index.html`，启动说明在 `README.md`。工作台复用 HackMate 的 LLM 客户端、工具注册表和 CDP 会话；聊天、行动记录和目标树保存在当前进程内。
+- 三栏工作台左右栏宽度现固定为左侧 248px、右侧 292px；应用最小宽度为 960px，小于该宽度的视口可横向滚动，中间栏保留至少 420px。
+- 左侧站点树采用 ZAP Sites 风格的可折叠 `Sites` 根节点，网站 origin 缩进列在其下；网站和有子项的目录行均可独立展开、收起，支持鼠标和键盘操作。状态在前端按 Sites / origin / path 保存，页面轮询重绘时会保留。若某个路径本身也是页面，点行选择页面，点箭头折叠子目录。
+- 每个网站节点行尾的 `×` 会将该网站及其整棵子树从当前左侧显示中移除，不删除后端已观察到的页面数据；标题栏的“恢复网站”按钮可恢复所有移除项。Recon 使用当前显示的网站列表。
 - Web 工作台左侧增加了站点结构排序和 Recon。Recon 的入口是 `WebSession.start_recon()`，同源爬取逻辑在 `_run_recon()`，HTTP 路由是 `POST /api/recon`；前端状态和按钮逻辑在 `hackmate/web/index.html` 的 `renderRecon()` 与 `reconButton` 事件处理器。它读取 HTML 中的 `<a href>`，使用同源 GET 请求，尊重 `robots.txt`，最多检查 300 页、深度 8；不执行 JavaScript，因此不会发现 `window.location.href` 动态路由，也不提交表单或扫描参数。URL 查询部分不显示在结构树中。
 - 接手 Web 工作台时无需重写；先看 `README.md`、`hackmate/webui.py`、`hackmate/web/index.html` 和当前 `git status` / diff。后续若继续增加工具或扩大前端功能，可考虑把爬取逻辑、HTTP 会话和静态 CSS/JS 拆分；这只是可选整理，不是当前继续开发的前置条件。
 - 修改 Web 工作台代码后需重启已运行的 HackMate 进程，才能加载新的后端路由和会话代码。已有 UI 进程可能仍在运行旧版本。

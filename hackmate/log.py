@@ -119,7 +119,21 @@ def format_recent(n: int = 10) -> str:
 
 
 def format_steps(n: int = 20) -> str:
-    entries = [e for e in reversed(_load_all()) if e.get("kind") in ("step", "job")][:n]
+    all_entries = _load_all()
+    # A stop ends the prior execution context. Keep that boundary visible, but do
+    # not inject stale navigation/tool calls from before it as current progress.
+    last_stop = next((i for i in range(len(all_entries) - 1, -1, -1)
+                      if all_entries[i].get("kind") == "task"
+                      and all_entries[i].get("status") == "interrupted"), -1)
+    entries = [e for e in all_entries[last_stop + 1:]
+               if e.get("kind") in ("step", "job")]
+    entries = entries[-n:]
+    if last_stop >= 0:
+        entries.insert(0, all_entries[last_stop])
     if not entries:
         return "还没有任何步骤记录。"
     return "\n".join(f"{i + 1}. {format_entry(e)}" for i, e in enumerate(entries))
+
+
+def record_task_interrupted() -> None:
+    record("task", status="interrupted", note="用户停止；任务未完成")

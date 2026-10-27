@@ -42,10 +42,18 @@ def load_group(vuln: str, group: str) -> list:
 
 
 def append_case(vuln: str, group: str, case: dict) -> str:
-    """把一个 case 追加到 evals/<vuln>/<group>.json（schema v2）。"""
+    """把一个 case 追加到 evals/<vuln>/<group>.json（schema v2），按关卡去重。
+
+    去重键 = (source, context)：同一靶场同一关卡只存第一次，重复打不再堆，
+    避免 dev 集里同一知识重复膨胀。
+    """
     p = EVALS_DIR / vuln / f"{group}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     cases = load_cases(p) if p.exists() else []
+    key = (case.get("source", ""), case.get("context", ""))
+    for c in cases:
+        if (c.get("source", ""), c.get("context", "")) == key:
+            return f"case 已存在（{key[0]}/{key[1][:30]}），跳过重复沉淀（当前 {len(cases)} 个）"
     cases.append(case)
     p.write_text(json.dumps(cases, ensure_ascii=False, indent=2), encoding="utf-8")
     return f"case 已沉淀进 {group} 集（当前 {len(cases)} 个）"
@@ -66,15 +74,16 @@ def record_transcript(vuln: str, case: dict, payload: str, ok: bool, how: str = 
         f.write(entry + "\n")
 
 
-def sample_hidden_round(vuln: str, size: int = 10) -> list:
-    """从 hidden 集洗牌轮换抽样：每轮取 size 个，size 次调用恰好覆盖一遍，轮完重洗。
+def sample_round(vuln: str, group: str, size: int = 10) -> list:
+    """从指定 group 洗牌轮换抽样：每轮取 size 个，多轮恰好覆盖全量，轮完重洗。
 
-    状态持久化到 evals/<vuln>/hidden_round.json（order + round）。case 数量变化自动重洗。
+    状态持久化到 evals/<vuln>/<group>_round.json（order + round）。case 数量变化自动重洗。
+    hidden 与 dev 通用（避免训练集 dev 膨胀后反哺采集拖慢 improve_skill）。
     """
-    cases = load_group(vuln, "hidden")
+    cases = load_group(vuln, group)
     if len(cases) <= size:
         return cases
-    state_path = EVALS_DIR / vuln / "hidden_round.json"
+    state_path = EVALS_DIR / vuln / f"{group}_round.json"
     order, round_idx = [], 0
     if state_path.exists():
         try:
@@ -97,6 +106,11 @@ def sample_hidden_round(vuln: str, size: int = 10) -> list:
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps({"order": order, "round": round_idx}), encoding="utf-8")
     return picked
+
+
+def sample_hidden_round(vuln: str, size: int = 10) -> list:
+    """hidden 集轮换抽样（兼容旧调用）。"""
+    return sample_round(vuln, "hidden", size)
 
 
 # ---- 判分 ----

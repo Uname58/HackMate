@@ -27,7 +27,7 @@
       margin: 0;
       min-width: 520px;
       min-height: 100vh;
-      overflow-x: hidden;
+      overflow-x: auto;
       overflow-y: auto;
       color: var(--text);
       background: radial-gradient(ellipse at 50% -28%, #193047 0, transparent 52%), var(--bg);
@@ -35,7 +35,7 @@
     }
     button, input { font: inherit; }
     button { color: inherit; }
-    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .app { min-width: 960px; min-height: 100vh; display: flex; flex-direction: column; }
     .topbar {
       height: 58px; flex: 0 0 58px; display: flex; align-items: center;
       justify-content: space-between; padding: 0 22px; border-bottom: 1px solid #29384c;
@@ -62,6 +62,11 @@
     .section-title { color: #bac8d9; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
     .head-action { width: 28px; height: 28px; color: #91a1b7; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 4px; cursor: default; transition: .18s ease; }
     .head-action:hover { color: #e0ebf6; border-color: #33465e; background: #1a2939; }
+    .restore-targets { width: auto; min-width: 0; padding: 4px 7px; color: #9ccbb7; font-size: 9px; white-space: nowrap; cursor: pointer; }
+    .site-entry { display: flex; align-items: center; gap: 2px; }
+    .site-entry .site-host { flex: 1; min-width: 0; }
+    .site-remove { flex: 0 0 24px; width: 24px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: 6px; color: #7e8da1; background: transparent; cursor: pointer; }
+    .site-remove:hover { color: #ffaaaa; border-color: #75434a; background: #301e25; }
     .target-card { margin: 14px 12px 12px; border: 1px solid #2d4257; background: linear-gradient(145deg, #182838, #121e2b); border-radius: 11px; padding: 12px; box-shadow: inset 0 1px #ffffff08, 0 8px 22px #0002; }
     .target-label { font-size: 9px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; color: #8497ad; margin-bottom: 7px; }
     .target-url { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; }
@@ -70,10 +75,15 @@
     .tree { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 8px 12px; }
     .tree-row { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 7px; color: #aab8ca; white-space: nowrap; transition: background .16s ease, color .16s ease; }
     .tree-row:hover { color: #e0ebf6; background: #ffffff08; }
-    .tree-row.root { color: #dce6f1; font-weight: 700; }
+    .tree-row.root { color: #dce6f1; font-weight: 700; cursor: pointer; }
+    .tree-row.site-group { border-bottom: 1px solid #233144; border-radius: 5px; background: #101a26; }
+    .tree-row.site-host { padding-left: 24px; }
+    .site-entry + .tree-branch { margin-left: 14px; }
+    .tree-row.folder-row { cursor: pointer; }
     .tree-row.indent { padding-left: 28px; }
     .tree-row.selected { color: #e9f3ff; background: linear-gradient(90deg, #1a3244, #152638); box-shadow: inset 2px 0 var(--blue); }
     .tree-row .chev { width: 10px; color: #8495aa; }
+    .tree-row .chev.folder-toggle { cursor: pointer; }
     .tree-row .path { overflow: hidden; text-overflow: ellipsis; }
     .tree-row .count { margin-left: auto; color: #718097; font-size: 10px; }
     .file-icon { color: var(--blue); font-size: 11px; }
@@ -161,14 +171,12 @@
     :focus-visible { outline: 2px solid #62e0ad; outline-offset: 2px; }
     @media (max-height: 720px) { .activity-log { padding-top: 12px; } }
     @media (max-width: 1100px) {
-      .workspace { grid-template-columns: 210px minmax(340px, 1fr) 235px; }
       .tools-scroll { padding-left: 9px; padding-right: 9px; }
     }
     @media (max-width: 760px) {
       .topbar { padding: 0 10px; }
       .top-right { gap: 8px; }
       #current-target, .avatar { display: none; }
-      .workspace { grid-template-columns: minmax(138px, .9fr) minmax(250px, 1.8fr) minmax(138px, .9fr); }
       .section-head { padding: 0 9px; }
       .target-card { margin: 9px 7px; padding: 8px; }
       .target-url { gap: 4px; font-size: 10px; overflow-wrap: anywhere; }
@@ -214,7 +222,7 @@
     </header>
     <main class="workspace">
       <aside class="sidebar">
-        <div class="section-head"><span class="section-title">目标结构</span><button class="head-action">•••</button></div>
+        <div class="section-head"><span class="section-title">目标结构</span><button class="head-action restore-targets" id="restore-targets" type="button" hidden title="恢复已移除的网站">恢复网站</button></div>
         <div class="target-card" id="target-card">
           <div class="target-label">当前目标</div>
           <div class="target-url"><span>◉</span><span id="target-origin">尚未发现网站</span></div>
@@ -271,10 +279,17 @@
     const reconButton = document.getElementById('recon-button');
     const reconState = document.getElementById('recon-state');
     const reconDescription = document.getElementById('recon-description');
+    const restoreTargetsButton = document.getElementById('restore-targets');
     let selectedTool = '';
     let availableTargets = [];
+    let allTargets = [];
+    const removedTargets = new Set();
     let currentRecon = { running: false };
     let reconAvailable = false;
+    let lastTreeCdpConnected = false;
+    let sitesCollapsed = false;
+    const collapsedTargets = new Set();
+    const collapsedFolders = new Set();
     let lastChatCount = -1;
     let lastActionSignature = '';
 
@@ -354,15 +369,82 @@
 
     function renderTree(targets, cdpConnected) {
       tree.replaceChildren();
-      availableTargets = targets;
-      if (!targets.length) {
-        tree.append(el('div', 'empty-tree', cdpConnected ? '已连接 CDP；访问页面后会逐步建立站点树。' : 'CDP 连接后，显示已打开或 HackMate 实际访问过的页面。'));
+      allTargets = targets;
+      const visibleTargets = targets.filter(target => !removedTargets.has(target.origin));
+      availableTargets = visibleTargets;
+      lastTreeCdpConnected = cdpConnected;
+      restoreTargetsButton.hidden = removedTargets.size === 0;
+      restoreTargetsButton.textContent = removedTargets.size ? `恢复网站 (${removedTargets.size})` : '恢复网站';
+      const sitesRoot = el('div', 'tree-row root site-group');
+      sitesRoot.setAttribute('role', 'button');
+      sitesRoot.setAttribute('tabindex', '0');
+      sitesRoot.setAttribute('aria-expanded', String(!sitesCollapsed));
+      sitesRoot.title = '点击展开或收起网站列表';
+      sitesRoot.append(el('span', 'chev', sitesCollapsed ? '›' : '⌄'),
+        el('span', 'folder-icon', '🌐'), el('span', 'path', 'Sites'),
+        el('span', 'count', String(visibleTargets.length)));
+      const sitesBranch = el('div', 'tree-branch');
+      sitesBranch.hidden = sitesCollapsed;
+      const toggleSites = () => {
+        sitesCollapsed = !sitesCollapsed;
+        sitesBranch.hidden = sitesCollapsed;
+        sitesRoot.setAttribute('aria-expanded', String(!sitesCollapsed));
+        sitesRoot.querySelector('.chev').textContent = sitesCollapsed ? '›' : '⌄';
+      };
+      sitesRoot.addEventListener('click', toggleSites);
+      sitesRoot.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toggleSites();
+        }
+      });
+      if (!visibleTargets.length) {
+        const emptyText = removedTargets.size
+          ? '所有网站都已从当前显示中移除；可用右上角按钮恢复。'
+          : cdpConnected ? '已连接 CDP；访问页面后会逐步建立站点树。' : 'CDP 连接后，显示已打开或 HackMate 实际访问过的页面。';
+        sitesBranch.append(el('div', 'empty-tree', emptyText));
       }
       let pageCount = 0;
-      targets.forEach(target => {
-        const root = el('div', 'tree-row root');
-        root.append(el('span', 'chev', '⌄'), el('span', '', '🌐'), el('span', 'path', target.host), el('span', 'count', String(target.pages.length)));
-        tree.append(root);
+      const selectPageRow = row => {
+        tree.querySelectorAll('.page-row.selected').forEach(item => item.classList.remove('selected'));
+        row.classList.add('selected');
+      };
+      visibleTargets.forEach(target => {
+        const root = el('div', 'tree-row root site-host');
+        const collapsed = collapsedTargets.has(target.origin);
+        root.setAttribute('role', 'button');
+        root.setAttribute('tabindex', '0');
+        root.setAttribute('aria-expanded', String(!collapsed));
+        root.title = '点击展开或收起此网站';
+        root.append(el('span', 'chev', collapsed ? '›' : '⌄'), el('span', '', '🌐'), el('span', 'path', target.host), el('span', 'count', String(target.pages.length)));
+        const branch = el('div', 'tree-branch');
+        branch.hidden = collapsed;
+        const toggleBranch = () => {
+          const nextCollapsed = !collapsedTargets.has(target.origin);
+          if (nextCollapsed) collapsedTargets.add(target.origin);
+          else collapsedTargets.delete(target.origin);
+          branch.hidden = nextCollapsed;
+          root.setAttribute('aria-expanded', String(!nextCollapsed));
+          root.querySelector('.chev').textContent = nextCollapsed ? '›' : '⌄';
+        };
+        root.addEventListener('click', toggleBranch);
+        root.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleBranch();
+          }
+        });
+        const siteEntry = el('div', 'site-entry');
+        const removeButton = el('button', 'site-remove', '×');
+        removeButton.type = 'button';
+        removeButton.title = '从左侧移除 ' + target.host;
+        removeButton.setAttribute('aria-label', '从左侧移除网站 ' + target.host);
+        removeButton.addEventListener('click', event => {
+          event.stopPropagation();
+          removedTargets.add(target.origin);
+          renderTree(allTargets, lastTreeCdpConnected);
+        });
+        siteEntry.append(root, removeButton);
         const pathRoot = { children: new Map(), page: null, path: '/' };
         target.pages.forEach(page => {
           pageCount += 1;
@@ -382,38 +464,85 @@
           row.style.paddingLeft = '28px';
           row.title = page.url;
           row.append(el('span', 'chev', '·'), el('span', 'file-icon', '◇'), el('span', 'path', '/'));
-          row.addEventListener('click', () => {
-            tree.querySelectorAll('.page-row.selected').forEach(node => node.classList.remove('selected'));
-            row.classList.add('selected');
-          });
-          tree.append(row);
+          row.addEventListener('click', () => selectPageRow(row));
+          branch.append(row);
         };
-        if (pathRoot.page) addPageRow(pathRoot.page);
+        if (pathRoot.page) {
+          addPageRow(pathRoot.page);
+        }
 
-        const renderNodes = (parent, depth) => {
+        const renderNodes = (parent, depth, container) => {
           const names = Array.from(parent.children.keys()).sort((a, b) =>
             a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
           names.forEach(name => {
             const node = parent.children.get(name);
             const hasChildren = node.children.size > 0;
+            const folderKey = target.origin + node.path;
+            const folderCollapsed = collapsedFolders.has(folderKey);
             const row = el('div', 'tree-row ' + (node.page ? 'page-row' : 'folder-row'));
             row.style.paddingLeft = (15 + Math.min(depth, 6) * 13) + 'px';
             row.title = node.page ? node.page.url : target.origin + node.path;
             const label = node.page ? (node.page.path.endsWith('/') ? name + '/' : name) : name + '/';
-            row.append(el('span', 'chev', hasChildren ? '⌄' : '·'),
+            const chevron = el('span', 'chev' + (hasChildren && node.page ? ' folder-toggle' : ''),
+              hasChildren ? (folderCollapsed ? '›' : '⌄') : '·');
+            row.append(chevron,
               el('span', node.page ? 'file-icon' : 'folder-icon', node.page ? '◇' : '▰'),
               el('span', 'path', label));
-            if (node.page) row.addEventListener('click', () => {
-              tree.querySelectorAll('.page-row.selected').forEach(item => item.classList.remove('selected'));
-              row.classList.add('selected');
-            });
-            tree.append(row);
-            if (hasChildren) renderNodes(node, depth + 1);
+            let childBranch = null;
+            if (hasChildren) {
+              childBranch = el('div', 'tree-branch');
+              childBranch.hidden = folderCollapsed;
+              const toggleFolder = () => {
+                const nextCollapsed = !collapsedFolders.has(folderKey);
+                if (nextCollapsed) collapsedFolders.add(folderKey);
+                else collapsedFolders.delete(folderKey);
+                childBranch.hidden = nextCollapsed;
+                if (node.page) chevron.setAttribute('aria-expanded', String(!nextCollapsed));
+                else row.setAttribute('aria-expanded', String(!nextCollapsed));
+                chevron.textContent = nextCollapsed ? '›' : '⌄';
+              };
+              if (node.page) {
+                chevron.setAttribute('role', 'button');
+                chevron.setAttribute('tabindex', '0');
+                chevron.setAttribute('aria-label', '展开或收起 ' + label);
+                chevron.setAttribute('aria-expanded', String(!folderCollapsed));
+                chevron.addEventListener('click', event => {
+                  event.stopPropagation();
+                  toggleFolder();
+                });
+                chevron.addEventListener('keydown', event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleFolder();
+                  }
+                });
+              } else {
+                row.setAttribute('role', 'button');
+                row.setAttribute('tabindex', '0');
+                row.setAttribute('aria-expanded', String(!folderCollapsed));
+                row.addEventListener('click', toggleFolder);
+                row.addEventListener('keydown', event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    toggleFolder();
+                  }
+                });
+              }
+            }
+            if (node.page) row.addEventListener('click', () => selectPageRow(row));
+            container.append(row);
+            if (childBranch) {
+              renderNodes(node, depth + 1, childBranch);
+              container.append(childBranch);
+            }
           });
         };
-        renderNodes(pathRoot, 1);
+        renderNodes(pathRoot, 1, branch);
+        sitesBranch.append(siteEntry, branch);
       });
-      const first = targets[0];
+      tree.append(sitesRoot, sitesBranch);
+      const first = visibleTargets[0];
       document.getElementById('target-origin').textContent = first ? first.origin : '尚未发现网站';
       document.getElementById('current-target').textContent = first ? first.host : '等待发现目标';
       document.getElementById('target-count').textContent = pageCount + ' 个页面';
@@ -552,6 +681,11 @@
         chatStatus.textContent = '无法连接工作台';
       }
       refresh();
+    });
+
+    restoreTargetsButton.addEventListener('click', () => {
+      removedTargets.clear();
+      renderTree(allTargets, lastTreeCdpConnected);
     });
 
     reconButton.addEventListener('click', async () => {

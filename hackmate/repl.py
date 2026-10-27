@@ -20,6 +20,10 @@ from . import memory, skill, log
 
 BANNER = "HackMate v2 — AI 渗透情报副驾驶 (CLI)"
 
+# 打靶动作集合：这些工具一旦被调用，说明 LLM 开始对靶场动手，此时程序强制注入 skill 知识
+# （不依赖 LLM 自觉调 load_skill —— 历史上它 0 次调用，导致打靶时用错参数名）。
+_BATTLE_TOOLS = {"navigate", "open_new_tab", "verify_xss", "find_xss_entries"}
+
 HELP = """命令:
   /help         显示本帮助
   /clear        清空上下文（保留 system prompt）
@@ -28,6 +32,7 @@ HELP = """命令:
   /cdp read N   读第 N 个页面的可见文本
   /web          打开 Web 图形工作台（行动记录 / 对话 / 工具箱）
   /guide        AI 引导：读当前关 → 生成步骤 → 调试 Chrome 里光标带你一步步学
+  /goal <目标>  设置自主目标，自动推进直到完成或卡住（如 /goal 打通 xss-labs level1-20）
   /skill        列出可用漏洞知识（skills/）
   /memory       查看长记忆 + 当前项目状态
   /log          查看最近 10 条关键结果（skill/漏洞/case）
@@ -146,7 +151,7 @@ def build_system_prompt(cfg):
         parts.append("## 当前项目状态（中记忆，重启后保留）\n" + proj)
     steps = log.format_steps(20)
     if steps and "还没有任何" not in steps:
-        parts.append("## 最近步骤日志（最新进展，优先于上面的中记忆）\n" + steps)
+        parts.append("## 最近执行记录（历史证据；不能据此推断当前目标或任务仍在执行）\n" + steps)
     sk = skill.summary()
     if sk:
         parts.append(sk + "\n（⚠️ 打关前必须先 load_skill 读完整知识，规则正文不在此摘要里）")
@@ -161,6 +166,55 @@ def _surface_jobs(jobs, client):
             "role": "user",
             "content": f"[系统通知] 后台任务 #{j.id}（{j.title}）{j.status}：{j.result or j.error}",
         })
+
+
+def _run_tool_loop(client, tool_schemas, ctx, resp, loaded_skill, max_iters=None):
+    """处理一轮 tool loop：dispatch 工具 + 附加 skill + submit，直到 LLM 返回 text。
+
+    打靶动作时程序强制把 skill 知识附加到工具结果（作为 tool 消息的一部分，不插入
+    独立消息，避免破坏 assistant tool_calls → tool 消息的配对结构）。
+    max_iters 非 None 时限制最大工具轮数（供 /goal 防失控），超限主动收尾。
+    返回 (resp, loaded_skill)。不捕获 KeyboardInterrupt，交给调用方。
+    """
+    iters = 0
+    while resp.get("type") == "tool_calls":
+        iters += 1
+        if max_iters is not None and iters > max_iters:
+            print(_yellow(f"[goal] 已 {max_iters} 轮工具调用仍未收敛，主动收尾"))
+            client.messages.append({
+                "role": "user",
+                "content": "[系统] 已达最大工具轮数，请立即收尾：完成则报 exploit结果，否则说明卡点。",
+            })
+            resp = client._dispatch(client._post(tools=tool_schemas))
+            break
+        results = []
+        for tc in resp["tool_calls"]:
+            fn = tc["function"]["name"]
+            try:
+                args = json.loads(tc["function"].get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            result = dispatch(fn, args, ctx)
+            if fn in _BATTLE_TOOLS and not loaded_skill:
+                parts = []
+                for v in skill.list_vulns():
+                    c = skill.load_skill(v)
+                    if c:
+                        parts.append(f"[系统已自动加载 '{v}' 完整 skill 知识，后续打靶务必据此执行]\n{c}")
+                if parts:
+                    result = result + "\n\n" + "\n\n".join(parts)
+                    loaded_skill = True
+            log.record_step(fn, args, result)
+            print(_render_tool(fn, args, result))
+            results.append((tc["id"], fn, result))
+        try:
+            resp = client.submit_tool_results(results, tools=tool_schemas)
+            client.compact()
+        except LLMError as e:
+            print(_c(f"[错误] {e}", "red"))
+            resp = {"type": "text", "content": ""}
+            break
+    return resp, loaded_skill
 
 
 def chat_loop():
@@ -191,6 +245,7 @@ def chat_loop():
     client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], system_prompt)
     jobs = JobManager()
     tool_schemas = schemas()
+    loaded_skill = False  # 本会话是否已自动加载过 skill 知识（打靶前程序强制注入）
 
     try:
         import readline  # noqa: F401  历史/行编辑，Windows 原生可能没有
@@ -235,8 +290,11 @@ def chat_loop():
             print("上下文已清空。")
             continue
         if line in ("/stop", "stop"):
+            memory.mark_project_interrupted()
+            log.record_task_interrupted()
+            client.system_prompt = build_system_prompt(cfg)
             client.clear()
-            print("[stop] 已停止当前任务，上下文已清空（后台任务用 /cancel N 中断）")
+            print("[stop] 上一任务已标记为中止/未完成，上下文已清空（后台任务用 /cancel N 中断）")
             continue
         if line in ("/help", "help"):
             print(HELP)
@@ -293,45 +351,57 @@ def chat_loop():
         if line.startswith("/cdp"):
             _handle_cdp(line, ensure_cdp_client, client)
             continue
+        if line.startswith("/goal"):
+            goal = line[len("/goal"):].strip()
+            if not goal:
+                print("用法：/goal <目标>，如 /goal 打通 xss-labs level1-20")
+                continue
+            prompt = (f"[目标] {goal}\n"
+                      f"请自主完成这个目标，直到完成或无法继续为止。\n"
+                      f"- 把目标拆成子步骤，按合理顺序逐个推进，完成一个再进下一个。\n"
+                      f"- 卡住时深入分析根因，不要轻易放弃或偏离到无关任务。\n"
+                      f"- 完成给出结果总结；无法继续时说明卡在哪、为什么。")
+            try:
+                resp = client.chat(prompt, tools=tool_schemas)
+                resp, loaded_skill = _run_tool_loop(
+                    client, tool_schemas, ctx, resp, loaded_skill, max_iters=300)
+            except KeyboardInterrupt:
+                memory.mark_project_interrupted()
+                log.record_task_interrupted()
+                client.system_prompt = build_system_prompt(cfg)
+                client.clear()
+                print("\n[已停止] 目标执行已中止，上下文已清空。")
+                continue
+            except LLMError as e:
+                print(_c(f"[错误] {e}", "red"))
+                continue
+            if resp.get("type") == "text" and resp["content"]:
+                print(f"\n{_c('HackMate>', 'blue')} {_colorize_report(resp['content'])}\n")
+            continue
 
         # --- 正常对话 + tool loop ---
         try:
             resp = client.chat(line, tools=tool_schemas)
+        except KeyboardInterrupt:
+            memory.mark_project_interrupted()
+            log.record_task_interrupted()
+            client.system_prompt = build_system_prompt(cfg)
+            client.clear()
+            print("\n[已停止] 当前任务已标记为中止/未完成，上下文已清空。")
+            continue
         except LLMError as e:
             print(_c(f"[错误] {e}", "red"))
             print(_c("[提示] 上一步失败，上下文已保留——可直接重试或 /clear 重来", "dim"))
             continue
 
         try:
-            while resp.get("type") == "tool_calls":
-                results = []
-                for tc in resp["tool_calls"]:
-                    fn = tc["function"]["name"]
-                    try:
-                        args = json.loads(tc["function"].get("arguments") or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    result = dispatch(fn, args, ctx)
-                    log.record_step(fn, args, result)
-                    print(_render_tool(fn, args, result))
-                    results.append((tc["id"], fn, result))
-                try:
-                    resp = client.submit_tool_results(results, tools=tool_schemas)
-                    client.compact()
-                except LLMError as e:
-                    print(_c(f"[错误] {e}", "red"))
-                    resp = {"type": "text", "content": ""}
-                    break
+            resp, loaded_skill = _run_tool_loop(client, tool_schemas, ctx, resp, loaded_skill)
         except KeyboardInterrupt:
-            print("\n[已停止] 当前任务已中断，回到对话（上下文保留）")
-            if resp.get("type") == "tool_calls":
-                for tc in resp["tool_calls"]:
-                    client.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "name": tc["function"]["name"],
-                        "content": "[已中断]",
-                    })
+            memory.mark_project_interrupted()
+            log.record_task_interrupted()
+            client.system_prompt = build_system_prompt(cfg)
+            client.clear()
+            print("\n[已停止] 当前任务已标记为中止/未完成，上下文已清空。")
             continue
 
         if resp.get("type") == "text" and resp["content"]:

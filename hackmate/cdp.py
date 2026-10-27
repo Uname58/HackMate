@@ -139,6 +139,14 @@ class CDPClient:
             })
         return tabs
 
+    def is_tab_active(self, tab):
+        """Return whether a page is the currently visible Chrome tab."""
+        ws_url = tab.get("ws")
+        if not ws_url:
+            raise CDPError("该 tab 没有 webSocketDebuggerUrl")
+        return self._cdp_eval(
+            ws_url, "document.visibilityState === 'visible'", timeout=3) is True
+
     def open_new_tab(self, url="about:blank"):
         from urllib.parse import quote
         req = urllib.request.Request(

@@ -154,7 +154,7 @@ def _fmt_score(s):
 
 # ---- 完整改进编排（作为 Job 跑）----
 def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
-                    hidden_sample=10, trials=1):
+                    hidden_sample=10, dev_sample=10, trials=1):
     """before 判分 → 产候选 → after 判分 → gate。供 JobManager.submit 调用。
 
     训练/考试隔离（防背题）：
@@ -168,7 +168,7 @@ def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
     vpath = get_variant_path(vuln, variant)
     is_new = not vpath.exists()
 
-    dev = ev.load_group(vuln, "dev")  # 训练集（improver 可见）
+    dev = ev.sample_round(vuln, "dev", size=dev_sample)  # 训练集（轮换抽样，improver 可见）
     regression = ev.load_group(vuln, "regression")
     hidden = ev.sample_hidden_round(vuln, size=hidden_sample)
     if not regression and not hidden:

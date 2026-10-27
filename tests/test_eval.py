@@ -50,6 +50,11 @@ def test_grader_ladder():
     # judge：评委判「否」
     ok, how = grader.grade(case, "完全无关", judges=[FakeLLM("否")])
     assert (not ok) and how == "judge", (ok, how)
+    # judge：评委否定变体（不能 / No），也应判否（不因「否」字缺失而漏判假阳性）
+    ok, how = grader.grade(case, "' onmouseover='alert(1)", judges=[FakeLLM("不能")])
+    assert (not ok) and how == "judge", (ok, how)
+    ok, how = grader.grade(case, "' onmouseover='alert(1)", judges=[FakeLLM("No")])
+    assert (not ok) and how == "judge", (ok, how)
     # 无评委 + 非子串 → fallback 判错
     ok, how = grader.grade(case, "完全无关", judges=None)
     assert (not ok) and how == "fallback", (ok, how)
@@ -104,6 +109,34 @@ def test_round_robin():
     print("✓ 轮换抽样（4 轮覆盖 40 个不重不漏）")
 
 
+def test_dev_round_robin():
+    """sample_round 泛化：dev 训练集也用轮换抽样，53 个 6 轮覆盖不重不漏。"""
+    _setup()
+    cases = [{"id": f"d{i:02d}", "reference_payload": f"kw{i}", "context": "c"} for i in range(53)]
+    (ev.EVALS_DIR / VULN / "dev.json").write_text(json.dumps(cases), encoding="utf-8")
+    seen = []
+    for _ in range(6):  # 53 个 / 10 每轮 = 6 轮，最后一轮 3 个
+        picked = ev.sample_round(VULN, "dev", size=10)
+        seen.extend(c["id"] for c in picked)
+    assert len(seen) == 53 and len(set(seen)) == 53, f"6 轮应覆盖 53 个不重不漏，实际 {len(set(seen))}"
+    _teardown()
+    print("✓ dev 轮换抽样（sample_round 泛化，53 个 6 轮覆盖）")
+
+
+def test_append_case_dedup():
+    """append_case 按 (source, context) 去重：同一关卡只存第一次。"""
+    _setup()
+    c1 = {"source": "xss-labs", "context": "level1 无过滤", "reference_payload": "<script>alert(1)</script>"}
+    c2 = {"source": "xss-labs", "context": "level1 无过滤", "reference_payload": "<script>alert(2)</script>"}
+    r1 = ev.append_case(VULN, "dev", c1)
+    r2 = ev.append_case(VULN, "dev", c2)
+    cases = ev.load_group(VULN, "dev")
+    assert len(cases) == 1, f"同关卡应只存一次，实际 {len(cases)}"
+    assert "跳过" in r2, r2
+    _teardown()
+    print("✓ save_case 去重（同 source+context 只存一次）")
+
+
 def _make_eval(before, after):
     state = {"n": 0}
     def fn():
@@ -154,6 +187,8 @@ if __name__ == "__main__":
     test_v1_schema_compat()
     test_eval_feedback()
     test_round_robin()
+    test_dev_round_robin()
+    test_append_case_dedup()
     test_gate_early_stop()
     test_gate_overfit()
     test_gate_regression_drop()

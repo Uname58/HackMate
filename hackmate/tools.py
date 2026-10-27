@@ -44,7 +44,25 @@ def _h_save_case(args, ctx):
     result = ev.append_case(vuln, "dev", case)
     log.record("case", vuln=vuln, context=case["context"],
                reference_payload=case["reference_payload"])
-    return result
+    # 沉淀后自动触发 improve_skill：从新 case 提炼 skill 改进，经 eval gate 判分（涨保留/跌回滚）。
+    # 程序强制（不依赖 LLM 自觉调 improve_skill —— 历史上 0 次调用导致闭环断裂）。
+    variant = args.get("variant", "") or "reflection_xss"
+
+    # 节流：已有 improve_skill 在跑/排队时不再叠加（避免判分任务堆积、gate 并发写同一 skill）
+    if any(j.kind == "improve_skill" and j.status in ("queued", "running")
+           for j in ctx.jobs.list_jobs()):
+        return result + "（已有 skill 改进任务在跑，本次不自动叠加，稍后可手动 improve_skill）"
+
+    def _run(job):
+        try:
+            cdp = ctx.get_cdp()
+        except Exception:
+            cdp = None
+        return skill.run_improvement(job, ctx.cfg, ctx.base_client, vuln, variant, cdp=cdp)
+
+    job = ctx.jobs.submit("improve_skill", _run, title=f"improve {vuln}/{variant}")
+    return (result + f"；已自动提交后台改进任务 #{job.id}"
+            f"（gate 判分后保留/回滚，/job {job.id} 看进度）")
 
 
 def _h_load_skill(args, ctx):
@@ -79,9 +97,17 @@ def _cdp(ctx):
 
 
 def _h_list_tabs(args, ctx):
-    tabs = _cdp(ctx).list_tabs()
-    return json.dumps([{"index": i, "title": t["title"], "url": t["url"]}
-                       for i, t in enumerate(tabs)], ensure_ascii=False)
+    cdp = _cdp(ctx)
+    tabs = cdp.list_tabs()
+    result = []
+    for i, tab in enumerate(tabs):
+        try:
+            active = cdp.is_tab_active(tab)
+        except Exception:
+            active = None
+        result.append({"index": i, "title": tab["title"], "url": tab["url"],
+                       "active": active})
+    return json.dumps(result, ensure_ascii=False)
 
 
 def _h_open_new_tab(args, ctx):
@@ -96,7 +122,14 @@ def _h_open_new_tab(args, ctx):
 
 def _h_read_page_text(args, ctx):
     c = _cdp(ctx)
-    text = c.read_page_text(test_tab=True)
+    if "index" in args:
+        tabs = c.list_tabs()
+        index = args["index"]
+        if not isinstance(index, int) or isinstance(index, bool) or not (0 <= index < len(tabs)):
+            return f"标签序号无效: {index}（当前共 {len(tabs)} 个页面）"
+        text = c.read_page_text(tab=tabs[index])
+    else:
+        text = c.read_page_text(test_tab=True)
     return text[:2000] if len(text) > 2000 else text
 
 
@@ -146,6 +179,7 @@ REGISTRY = [
         "description": "把刚打通的靶场沉淀成一个 eval case，写进 dev 训练集（供 improve_skill 学习）。仅在 verify_xss 返回 CONFIRMED 后调用。",
         "parameters": _obj({
             "vuln": {"type": "string", "description": "漏洞大类，如 xss"},
+            "variant": {"type": "string", "description": "漏洞类型，如 reflection_xss / dom_xss / stored_xss（默认 reflection_xss）"},
             "context": {"type": "string", "description": "场景：反射点落在哪个上下文、有什么过滤/编码"},
             "reference_payload": {"type": "string", "description": "成功触发执行的 payload（作为参考解）"},
             "principle": {"type": "string", "description": "绕过手法/原理关键词，如「JS 字符串 breakout」"},
@@ -171,7 +205,7 @@ REGISTRY = [
     },
     {
         "name": "list_tabs",
-        "description": "列出 Chrome 当前打开的所有页面（标题和 URL）",
+        "description": "列出 Chrome 页面并标出 active=true 的前台可见标签；若用户指当前 Chrome 页面，先用此工具定位唯一前台标签。",
         "parameters": _obj({}),
         "handler": _h_list_tabs,
     },
@@ -183,8 +217,8 @@ REGISTRY = [
     },
     {
         "name": "read_page_text",
-        "description": "读取 HackMate 专用测试标签的可见文本内容",
-        "parameters": _obj({}),
+        "description": "读取页面可见文本。读取当前 Chrome 页面时传 list_tabs 给出的 index；省略 index 才读取 HackMate 专用测试标签。",
+        "parameters": _obj({"index": {"type": "integer", "description": "list_tabs 返回的标签序号；省略时读取 HackMate 专用测试标签"}}),
         "handler": _h_read_page_text,
     },
     {

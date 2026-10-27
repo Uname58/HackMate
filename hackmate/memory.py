@@ -46,6 +46,27 @@ def save_project(note: str) -> None:
     _ensure(PROJECT_FILE).write_text(note, encoding="utf-8")
 
 
+def mark_project_interrupted() -> None:
+    """Persist that the last active task was stopped, without erasing its notes."""
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    marker = (
+        "<!-- HACKMATE_INTERRUPTION_START -->\n"
+        f"## 最近任务状态（{stamp}）\n\n"
+        "- 上一个任务已被用户停止，状态为中止 / 未完成；不得将其报告为完成或自动续做。\n"
+        "- 当前目标需要重新核实。若用户指当前 Chrome 页面，先列标签并读取唯一前台标签；"
+        "不可根据历史步骤日志或旧靶场记录推定当前目标。\n"
+        "<!-- HACKMATE_INTERRUPTION_END -->\n\n"
+    )
+    existing = _read(PROJECT_FILE)
+    start = "<!-- HACKMATE_INTERRUPTION_START -->"
+    end = "<!-- HACKMATE_INTERRUPTION_END -->"
+    if start in existing and end in existing:
+        before, rest = existing.split(start, 1)
+        _, after = rest.split(end, 1)
+        existing = before + after.lstrip("\n")
+    _ensure(PROJECT_FILE).write_text(marker + existing.lstrip("\n"), encoding="utf-8")
+
+
 def reset_project() -> None:
     _ensure(PROJECT_FILE).write_text("", encoding="utf-8")
 

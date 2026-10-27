@@ -18,7 +18,7 @@ import webbrowser
 from .config import load_config
 from .jobs import JobManager
 from .llm import LLMClient, LLMCancelled, LLMError
-from . import log
+from . import log, memory
 from .repl import HELP, build_system_prompt
 from .tools import ToolContext, dispatch, schemas
 
@@ -475,7 +475,15 @@ class WebSession:
         finally:
             with self._lock:
                 if cancel_event.is_set():
+                    memory.mark_project_interrupted()
+                    log.record_task_interrupted()
+                    self.client.system_prompt = build_system_prompt(self.cfg)
                     self.client.clear()
+                    self._chat.append({
+                        "role": "assistant",
+                        "content": "当前任务已中止并标记为未完成。下次开始时会重新核对当前目标。",
+                        "time": time.strftime("%H:%M:%S"),
+                    })
                     if self._stop_action_id is not None:
                         self._finish_action(self._stop_action_id, "当前任务已停止", "done")
                 self._stop_action_id = None

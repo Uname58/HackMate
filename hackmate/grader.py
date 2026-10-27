@@ -57,8 +57,22 @@ def _ask(judge, prompt):
     return judge.ask(prompt).strip()
 
 
+def _is_negative(verdict):
+    """判断评委回答是否否定。返回 True / False / None（None=空/无法判断）。
+
+    评委虽被要求只答「是/否」，但实测会返回变体（不能 / 不行 / No / cannot 等），
+    子串匹配「否」会漏掉这些 → 假阳性。故用否定词集合覆盖中英文常见变体。
+    """
+    v = (verdict or "").strip().lower()
+    if not v:
+        return None
+    neg = ("否", "不能", "不行", "不可以", "不对", "无法", "错误", "错", "假",
+           "no", "cannot", "can't", "cant", "false", "incorrect", "wrong", "unable")
+    return any(k in v for k in neg)
+
+
 def judge_consensus(case, payload, judges):
-    """多评委共识：任一评委判「否」→ False；全未否 → True；评委异常跳过不误杀。
+    """多评委共识：任一评委判否定 → False；全未否定 → True；评委异常/空答跳过不误杀。
 
     judges 空 / None → 返回 None（无法判，交给 fallback）。
     """
@@ -79,8 +93,11 @@ def judge_consensus(case, payload, judges):
             verdict = _ask(j, prompt)
         except Exception:
             continue  # 评委异常，跳过不误杀
+        neg = _is_negative(verdict)
+        if neg is None:
+            continue  # 空答案，跳过不误判
         any_judged = True
-        if "否" in verdict:
+        if neg:
             return False
     return True if any_judged else None
 

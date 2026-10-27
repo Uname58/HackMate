@@ -7,7 +7,7 @@ config.json
 memorys/log.jsonl
 memorys/project/current.md
 evals/*/transcripts/
-evals/*/hidden_round.json
+evals/*/*_round.json
 evals/*/backups_split/
 skills/*/backups/
 .hackmate-chrome/
