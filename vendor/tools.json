@@ -1,0 +1,50 @@
+{
+  "sqlmap": {
+    "entry": "python sqlmap/sqlmap.py",
+    "desc": "SQL 注入自动化（拖库/拿权限）",
+    "ready": true
+  },
+  "commix": {
+    "entry": "python commix/commix.py",
+    "desc": "命令注入自动化",
+    "ready": true
+  },
+  "fuxploider": {
+    "entry": "python fuxploider/fuxploider.py",
+    "desc": "文件上传漏洞检测",
+    "ready": true
+  },
+  "blindx": {
+    "entry": "python -m blindx",
+    "desc": "盲 XSS 自动化测试",
+    "ready": true
+  },
+  "4-zero-3": {
+    "entry": "bash 4-zero-3/403-bypass.sh",
+    "desc": "403/401 绕过",
+    "ready": false,
+    "note": "bash 脚本，依赖 tput/awk/sed/curl 等 Linux 工具，Windows 原生跑不了（需 WSL bash）"
+  },
+  "waf-bypass": {
+    "entry": "python waf-bypass/main.py",
+    "desc": "WAF 绕过测试",
+    "ready": true
+  },
+  "beef": {
+    "entry": "bundle exec ruby beef",
+    "desc": "浏览器利用框架 BeEF",
+    "ready": true,
+    "note": "依赖全装好(130 gems)。服务型(Web UI 3000端口)，需单独启动，不适合 run_tool 一次性调用"
+  },
+  "dalfox": {
+    "entry": "dalfox\\dalfox.exe",
+    "desc": "强力 XSS 扫描器（Rust）",
+    "ready": true
+  },
+  "phpsploit": {
+    "entry": "phpsploit/phpsploit",
+    "desc": "PHP 后渗透 C2 框架",
+    "ready": false,
+    "note": "工具作者明确不支持 Windows（代码写死 sys.exit），仅 Kali/Linux"
+  }
+}

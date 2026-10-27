@@ -14,5 +14,5 @@ skills/*/backups/
 tools/cdp/launcher/*.exe
 
 # 第三方工具（vendor/，git clone 下载，不进仓库）
-vendor/
+vendor/*
 !vendor/tools.json
