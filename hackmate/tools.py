@@ -176,6 +176,27 @@ def _h_list_tabs(args, ctx):
     return json.dumps(result, ensure_ascii=False)
 
 
+def _h_close_tab(args, ctx):
+    """关闭指定 tab（index 或 id）。HackMate 专用测试标签拒绝关闭。"""
+    cdp = _cdp(ctx)
+    tabs = cdp.list_tabs()
+    if "index" in args:
+        index = args["index"]
+        if not isinstance(index, int) or isinstance(index, bool) or not (0 <= index < len(tabs)):
+            return f"标签序号无效: {index}（当前共 {len(tabs)} 个页面）"
+        tab = tabs[index]
+    elif "id" in args:
+        tab = next((t for t in tabs if t["id"] == args["id"]), None)
+        if tab is None:
+            return f"未找到 id={args['id']} 的标签"
+    else:
+        return "需要 index 或 id 参数"
+    closed = cdp.close_tab(tab["id"])
+    if closed is False:
+        return json.dumps({"closed": False, "reason": "HackMate 专用测试标签，拒绝关闭"}, ensure_ascii=False)
+    return json.dumps({"closed": True, "title": tab["title"], "url": tab["url"]}, ensure_ascii=False)
+
+
 def _h_open_new_tab(args, ctx):
     cdp = _cdp(ctx)
     tab = cdp.ensure_test_tab()
@@ -295,6 +316,15 @@ REGISTRY = [
         "description": "列出 Chrome 页面并标出 active=true 的前台可见标签；若用户指当前 Chrome 页面，先用此工具定位唯一前台标签。",
         "parameters": _obj({}),
         "handler": _h_list_tabs,
+    },
+    {
+        "name": "close_tab",
+        "description": "关闭指定 Chrome 标签（传 list_tabs 给出的 index 或 id）。用于清掉残留的旧靶场页面，避免误导。HackMate 专用测试标签拒绝关闭。",
+        "parameters": _obj({
+            "index": {"type": "integer", "description": "list_tabs 返回的标签序号"},
+            "id": {"type": "string", "description": "标签 id（与 index 二选一）"},
+        }),
+        "handler": _h_close_tab,
     },
     {
         "name": "open_new_tab",

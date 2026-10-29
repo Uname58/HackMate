@@ -139,6 +139,16 @@ class CDPClient:
             })
         return tabs
 
+    def close_tab(self, tab_id):
+        """关闭指定 tab（保留 HackMate 专用测试标签，避免误关自己正在用的）。"""
+        if tab_id == self._test_tab_id:
+            return False
+        try:
+            with urllib.request.urlopen(f"{self.base}/json/close/{tab_id}", timeout=self.timeout) as r:
+                return True
+        except Exception as e:
+            raise CDPError(f"关闭标签失败: {e}")
+
     def is_tab_active(self, tab):
         """Return whether a page is the currently visible Chrome tab."""
         ws_url = tab.get("ws")
