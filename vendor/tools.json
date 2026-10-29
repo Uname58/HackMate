@@ -1,16 +1,16 @@
 {
   "sqlmap": {
-    "entry": "python sqlmap/sqlmap.py",
+    "entry": "python sqlmap.py",
     "desc": "SQL 注入自动化（拖库/拿权限）",
     "ready": true
   },
   "commix": {
-    "entry": "python commix/commix.py",
+    "entry": "python commix.py",
     "desc": "命令注入自动化",
     "ready": true
   },
   "fuxploider": {
-    "entry": "python fuxploider/fuxploider.py",
+    "entry": "python fuxploider.py",
     "desc": "文件上传漏洞检测",
     "ready": true
   },
@@ -26,7 +26,7 @@
     "note": "bash 脚本，依赖 tput/awk/sed/curl 等 Linux 工具，Windows 原生跑不了（需 WSL bash）"
   },
   "waf-bypass": {
-    "entry": "python waf-bypass/main.py",
+    "entry": "python main.py",
     "desc": "WAF 绕过测试",
     "ready": true
   },
@@ -37,7 +37,7 @@
     "note": "依赖全装好(130 gems)。服务型(Web UI 3000端口)，需单独启动，不适合 run_tool 一次性调用"
   },
   "dalfox": {
-    "entry": "dalfox\\dalfox.exe",
+    "entry": "dalfox.exe",
     "desc": "强力 XSS 扫描器（Rust）",
     "ready": true
   },

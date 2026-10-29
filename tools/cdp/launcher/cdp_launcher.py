@@ -58,30 +58,44 @@ def start_chrome():
     time.sleep(4)
 
 def proxy_handle(client, addr):
-    try:
-        remote = connect_chrome()
-        if remote is None:
-            return
-        remote.settimeout(30)
-        client.settimeout(30)
-        def forward(src, dst):
-            try:
-                while True:
-                    data = src.recv(8192)
-                    if not data: break
-                    dst.send(data)
-            except: pass
-            finally:
-                try: dst.close()
-                except: pass
-        t1 = threading.Thread(target=forward, args=(client, remote), daemon=True)
-        t2 = threading.Thread(target=forward, args=(remote, client), daemon=True)
-        t1.start(); t2.start()
-        t1.join(); t2.join()
-    except: pass
-    finally:
-        try: client.close()
-        except: pass
+    remote = connect_chrome()
+    if remote is None:
+        try:
+            client.close()
+        except Exception:
+            pass
+        return
+    # 去掉 30s 超时：WebSocket 是长连接，超时会断掉合法空闲连接。
+    remote.settimeout(None)
+    client.settimeout(None)
+
+    def pump(src, dst):
+        """单向转发。不关闭对端 socket —— 否则一个方向结束会立刻掐断另一个方向（WebSocket 转发 bug 根因）。"""
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except (socket.timeout, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
+
+    t1 = threading.Thread(target=pump, args=(client, remote), daemon=True)
+    t2 = threading.Thread(target=pump, args=(remote, client), daemon=True)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    # 两个方向都结束后，统一双向关闭（shutdown 通知对端，close 释放）。
+    for s in (client, remote):
+        try:
+            s.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
+            s.close()
+        except Exception:
+            pass
 
 def start_proxy():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

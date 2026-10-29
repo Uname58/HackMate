@@ -1,14 +1,12 @@
-# 文件上传(任意写入 / Webshell)— 决策索引
+# File Upload overview
+
+> 排他：仅当「上传点校验绕过 / 上传后解析」时用本 skill。纯 URL 参数读文件 → path-traversal；上传+解析完整 RCE 链 → rce；本 skill 只管上传点校验绕过。
 
 ## 一句话说清
-文件上传 = 把不可信的字节存到服务器 + 后端能解析它。
-两层都得突破：(a) **绕过校验**，(b) **触发解析**。
-SRC 价值：成功 = 直接 RCE，P0；失败 = 受限上传，P2/P3。
+文件上传 = 把不可信字节存到服务器 + 后端能解析它。两层都突破：①绕过校验 ②触发解析。成功=直接 RCE(P0)，失败=受限上传(P2/P3)。
 
-## 子类型路由（按信号读对应 variant）
-| 入口信号 | MUST Read |
-|---|---|
-| 普通上传点(form-data file) / 头像 / 图片 / 文档上传 | `10-upload-bypass.md`(扩展名 / MIME / 空字节 / Content-Type 全套) |
-| 上传 `.zip`/`.tar`/压缩包 → 服务端解压 / `tar` 命令 | `11-archive-traversal.md`(Zip Slip / 解压路径穿越) |
-| 上传后有 "校验 → 移动" / "扫描 → 删除" 流程 / 上传同时直出预览 URL | `12-race-download.md`(竞态 + 任意下载) |
-| 直接拼到 webshell:见 `../rce/13-file-rce-chain.md`(上传 + 解析配合) |
+## 判断流程（核心，正文 Step1-5）
+.jpg 基线成功 → shell.php 正常 Content-Type 被拒=有校验 → 逐层换壳(扩展名/Content-Type/magic bytes)定位校验层 → 上传后访问 URL 判「源码(未解析) vs 执行(uid=)」→ 全不解析=降级测存储 XSS/XXE/phar。
+
+## 工具
+run_tool 调 fuxploider（上传点爆破）。

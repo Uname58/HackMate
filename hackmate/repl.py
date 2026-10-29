@@ -12,7 +12,7 @@ import json
 import argparse
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config, PRESET_PROVIDERS
 from .llm import LLMClient, LLMError
 from .jobs import JobManager
 from .tools import ToolContext, schemas, dispatch, discover_mcp
@@ -33,6 +33,10 @@ HELP = """命令:
   /web          打开 Web 图形工作台（行动记录 / 对话 / 工具箱）
   /guide        AI 引导：读当前关 → 生成步骤 → 调试 Chrome 里光标带你一步步学
   /goal <目标>  设置自主目标，自动推进直到完成或卡住（如 /goal 打通 xss-labs level1-20）
+  /model              弹出所有 LLM 供应商（含预设 model）
+  /model <名称或编号>  切换供应商（如 /model 2 或 /model openai）
+  /model <名称> <model>  切换 + 指定任意模型（如 /model openai gpt-5.5）
+  /model <名称> <key>  配 key 并切换（sk- 开头识别为 key）
   /skill        列出可用漏洞知识（skills/）
   /memory       查看长记忆 + 当前项目状态
   /log          查看最近 10 条关键结果（skill/漏洞/case）
@@ -91,6 +95,10 @@ def _render_tool(fn, args, result):
         return _c(f"  · 验证 {rs[:40]}  {url}", "dim")
     if fn == "save_case":
         return _c(f"  ✎ 记录 case [{args.get('vuln','')}] {rs}", "green")
+    if fn == "run_tool":
+        return _c(f"  ⚙ run_tool {args.get('tool','')} {args.get('args','')}".rstrip(), "magenta")
+    if fn == "search_cve":
+        return _c(f"  🔍 search_cve {args.get('keyword', args.get('component',''))}", "magenta")
     if fn == "improve_skill":
         return _c(f"  ⚙ 提交 skill 优化 '{args.get('vuln','')}/{args.get('variant','')}'（后台 Job）", "magenta")
     if fn == "open_new_tab":
@@ -299,6 +307,66 @@ def chat_loop():
             continue
         if line in ("/help", "help"):
             print(HELP)
+            continue
+        if line.startswith("/model"):
+            parts = line.split()
+            presets = PRESET_PROVIDERS
+            configured = cfg.get("providers", {})
+            cur = cfg.get("provider", "")
+            if len(parts) == 1:
+                print("LLM 供应商（/model <编号或名称> 切换）：")
+                for i, (name, p) in enumerate(presets.items(), 1):
+                    has_key = bool(configured.get(name, {}).get("api_key"))
+                    mark = "  ← 当前" if name == cur else ""
+                    kstate = "已配key" if has_key else "未配key"
+                    compat = "" if p.get("compat", True) else "（非OpenAI兼容，需adapter）"
+                    print(f"  [{i}] {name:<12} {p['desc']:<14} {p['model']:<28} {kstate}{compat}{mark}")
+                print("切换 + 指定任意模型：/model <名称> [model]（如 /model openai gpt-5.5）")
+                print("配 key：/model <名称> <api_key>（sk- 开头识别为 key）")
+                continue
+            name = parts[1]
+            if name.isdigit():
+                keys = list(presets.keys())
+                idx = int(name) - 1
+                if 0 <= idx < len(keys):
+                    name = keys[idx]
+                else:
+                    print(f"编号 {parts[1]} 无效（共 {len(keys)} 个）")
+                    continue
+            if name not in presets:
+                print(f"未知供应商 '{name}'。用 /model 看全部可用供应商")
+                continue
+            p = presets[name]
+            if not p.get("compat", True):
+                print(f"{name} 是非 OpenAI 兼容端点（{p['desc']}），需要单独 adapter，当前不支持直接切换")
+                continue
+            stored = configured.get(name, {})
+            api_key = stored.get("api_key", "")
+            model = stored.get("model", p["model"])
+            extra = parts[2:]
+            if extra:
+                # 第一个参数：sk-/长串 → key；否则 → model（任意模型名，如 gpt-5.5）
+                if extra[0].startswith("sk-") or extra[0].startswith("gsk_") or len(extra[0]) >= 30:
+                    api_key = extra[0]
+                    if len(extra) >= 2:
+                        model = extra[1]
+                else:
+                    model = extra[0]
+            if not api_key:
+                print(f"{name}（{p['desc']}）未配 api_key。用 /model {name} <你的key> 配置，或改 config.json 的 providers")
+                continue
+            cfg.setdefault("providers", {})[name] = {
+                "base_url": p["base_url"], "model": model, "api_key": api_key,
+            }
+            cfg["provider"] = name
+            cfg["base_url"] = p["base_url"]
+            cfg["model"] = model
+            cfg["skill_model"] = model  # 打靶 / skill 改进用同一个 model
+            cfg["api_key"] = api_key
+            system_prompt = build_system_prompt(cfg)
+            client = LLMClient(cfg["base_url"], cfg["api_key"], cfg["model"], system_prompt)
+            ctx.base_client = client
+            print(f"已切换到 {name}（{model} @ {p['base_url']}），上下文已清空")
             continue
         if line == "/skill":
             vulns = skill.list_vulns()

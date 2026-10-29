@@ -164,11 +164,18 @@ class CDPClient:
             for tab in tabs:
                 if tab.get("id") == self._test_tab_id:
                     return tab
-        tab = self.open_new_tab(initial_url)
-        self._test_tab_id = tab.get("id")
+        raw = self.open_new_tab(initial_url)
+        self._test_tab_id = raw.get("id")
         if not self._test_tab_id:
             raise CDPError("创建测试标签失败：Chrome 未返回 tab id")
-        return tab
+        # open_new_tab 返回原始 JSON（键名 webSocketDebuggerUrl），要转成 list_tabs 的统一格式（ws 键），
+        # 否则后续 op(tab) 用 tab["ws"] 会 KeyError 'ws'。
+        return {
+            "id": raw.get("id", ""),
+            "title": raw.get("title", ""),
+            "url": raw.get("url", ""),
+            "ws": raw.get("webSocketDebuggerUrl", ""),
+        }
 
     def _cdp_cmd(self, ws_url, method, params=None, timeout=10):
         if not _HAS_WS:
@@ -232,6 +239,15 @@ class CDPClient:
     def navigate(self, url, index=0, test_tab=False):
         def op(tab):
             self._cdp_cmd(tab["ws"], "Page.navigate", {"url": url})
+            # 等待页面加载完成（轮询 readyState），否则紧随的 read_page_text 读到旧页面/about:blank
+            deadline = time.time() + 12
+            while time.time() < deadline:
+                try:
+                    if self._cdp_eval(tab["ws"], "document.readyState", timeout=3) == "complete":
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
             return f"已导航到 {url}"
         return self._resilient(index, op, test_tab=test_tab)
 
@@ -449,14 +465,40 @@ def _find_chrome():
 
 
 def _cleanup_wsl_cdp():
-    cmd = (
-        "Get-Process -Name cdp_launcher -ErrorAction SilentlyContinue | Stop-Process -Force; "
-        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'remote-debugging-port' } | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    # 先判断当前 PowerShell 是否已提权：cdp_launcher 是 --uac-admin 提权进程，
+    # 普通权限 Stop-Process 会 Access Denied 杀不掉 → 残留 proxy 抢 9222。
+    check = (
+        "$p=New-Object Security.Principal.WindowsPrincipal("
+        "[Security.Principal.WindowsIdentity]::GetCurrent());"
+        "if($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){'YES'}else{'NO'}"
     )
     try:
-        subprocess.run(["powershell.exe", "-Command", cmd], capture_output=True, timeout=20)
+        is_admin = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", check],
+            capture_output=True, text=True, timeout=15).stdout.strip()
+    except Exception:
+        is_admin = "NO"
+    if is_admin == "YES":
+        # 已提权：直接 taskkill，不弹 UAC
+        cmd = (
+            "taskkill /F /T /IM cdp_launcher.exe 2>$null; "
+            "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+            "Where-Object { $_.CommandLine -match 'remote-debugging-port' } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+    else:
+        # 未提权：提权 taskkill（会弹一次 UAC，需用户点「是」）
+        cmd = (
+            "Start-Process -Verb RunAs -WindowStyle Hidden -FilePath 'taskkill.exe' "
+            "-ArgumentList '/F /T /IM cdp_launcher.exe'; "
+            "Start-Sleep 2; "
+            "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+            "Where-Object { $_.CommandLine -match 'remote-debugging-port' } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+    try:
+        subprocess.run(["powershell.exe", "-NoProfile", "-Command", cmd],
+                       capture_output=True, timeout=30)
     except Exception:
         pass
 
@@ -483,7 +525,10 @@ def _kill_debug_chrome():
 
 def launch_chrome(port=9222):
     launcher = find_launcher()
-    if launcher and _is_wsl():
+    # 找到 launcher 就统一用它（Windows 原生和 WSL 都走这条）：由 cdp_launcher 拉起
+    # 调试 Chrome(127.0.0.1:9222) + proxy(0.0.0.0:9222)，避免 fallback 分支自启 IPv6-only
+    # Chrome([::1]:9222) 与 proxy 抢端口 → CDP 反复断。
+    if launcher:
         _cleanup_wsl_cdp()
         time.sleep(2)
         win_path = _wsl_to_windows_path(launcher)

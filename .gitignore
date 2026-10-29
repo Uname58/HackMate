@@ -16,3 +16,17 @@ tools/cdp/launcher/*.exe
 # 第三方工具（vendor/，git clone 下载，不进仓库）
 vendor/*
 !vendor/tools.json
+
+# PyInstaller 编译产物
+tools/cdp/launcher/build/
+tools/cdp/launcher/dist/
+
+# 备份 + 临时文件（不进仓库）
+*.bak
+*.bak_*
+skills.bak_*/
+cmd.txt
+test_cdp_direct.py
+webui_state.json
+start_webui.py
+webui_ctl.py

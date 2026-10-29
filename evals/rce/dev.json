@@ -1,0 +1,9 @@
+[
+  {
+    "id": "auto-20261029213734",
+    "context": "DVWA low exec: ip parameter passed unsanitized to shell ping command; `;` chaining executes arbitrary OS commands as www-data",
+    "reference_payload": "127.0.0.1; id",
+    "principle": "OS command injection via shell metacharacter chaining (;)",
+    "source": "dvwa"
+  }
+]

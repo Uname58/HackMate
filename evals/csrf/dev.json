@@ -1,0 +1,9 @@
+[
+  {
+    "id": "auto-20261029213722",
+    "context": "DVWA low csrf: password change form has no user_token/anti-CSRF token, submitted via GET; only session cookie required, so external page can forge via <img src> or iframe",
+    "reference_payload": "http://localhost:8081/vulnerabilities/csrf/?password_new=password&password_conf=password&Change=Change",
+    "principle": "No anti-CSRF token + GET state-changing request: cross-site forgery works with victim cookie only",
+    "source": "dvwa"
+  }
+]

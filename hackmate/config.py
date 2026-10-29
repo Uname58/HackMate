@@ -14,6 +14,10 @@ CONFIG_FILENAMES = [
 ]
 
 DEFAULTS = {
+    "provider": "deepseek",
+    "providers": {
+        "deepseek": {"base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "api_key": ""},
+    },
     "api_key": "",
     "base_url": "https://api.deepseek.com/v1",
     "model": "deepseek-chat",
@@ -26,7 +30,21 @@ DEFAULTS = {
 
 # 这些 key 允许被 config 文件 / 环境变量覆盖
 _KEYS = ("api_key", "base_url", "model", "skill_model", "system_prompt",
-         "cdp_host", "cdp_port", "mcp_servers")
+         "cdp_host", "cdp_port", "mcp_servers", "provider", "providers")
+
+# 内置 LLM 供应商预设（/model 命令弹出选择用）。compat=False 表示非 OpenAI 兼容端点，需 adapter。
+PRESET_PROVIDERS = {
+    "deepseek":   {"base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "desc": "DeepSeek"},
+    "openai":     {"base_url": "https://api.openai.com/v1", "model": "gpt-4o", "desc": "OpenAI GPT"},
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "deepseek/deepseek-chat", "desc": "OpenRouter 聚合"},
+    "groq":       {"base_url": "https://api.groq.com/openai/v1", "model": "llama-3.3-70b-versatile", "desc": "Groq 快"},
+    "mistral":    {"base_url": "https://api.mistral.ai/v1", "model": "mistral-large-latest", "desc": "Mistral"},
+    "together":   {"base_url": "https://api.together.xyz/v1", "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "desc": "Together"},
+    "ollama":     {"base_url": "http://localhost:11434/v1", "model": "llama3", "desc": "Ollama 本地"},
+    "vllm":       {"base_url": "http://localhost:8000/v1", "model": "local-model", "desc": "vLLM/本地"},
+    "anthropic":  {"base_url": "https://api.anthropic.com/v1", "model": "claude-sonnet-4", "desc": "Claude", "compat": False},
+    "gemini":     {"base_url": "https://generativelanguage.googleapis.com/v1beta", "model": "gemini-2.0-flash", "desc": "Gemini", "compat": False},
+}
 
 
 def app_root():
@@ -98,5 +116,17 @@ def load_config():
         v = os.environ.get(env)
         if v:
             cfg[key] = v
+
+    # 展开当前 provider 到顶层 base_url/api_key/model（多 provider 运行时切换用）
+    provider = cfg.get("provider", "")
+    providers = cfg.get("providers", {})
+    if provider in providers:
+        p = providers[provider]
+        if p.get("base_url"):
+            cfg["base_url"] = p["base_url"]
+        if p.get("model"):
+            cfg["model"] = p["model"]
+        if p.get("api_key"):
+            cfg["api_key"] = p["api_key"]
 
     return cfg

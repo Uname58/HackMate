@@ -96,7 +96,11 @@ def _h_run_tool(args, ctx):
         import os
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"  # Windows 原生 GBK 控制台编码不了 emoji/特殊字符
-        r = subprocess.run(cmd, cwd=str(vendor_dir), capture_output=True, text=True,
+        # cwd：工具自己的目录（fuxploider 等用相对路径读 templates.json 等资源文件，必须在工具目录内跑）；
+        # blindx 是包（python -m 导入），cwd 需在 vendor/（父目录）才能 import。
+        tool_dir = vendor_dir / tool
+        cwd = str(vendor_dir if tool == "blindx" else tool_dir)
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace", env=env, timeout=120)
         out = (r.stdout or "") + ("\n[stderr]\n" + r.stderr if r.stderr else "")
         if len(out) > 6000:
@@ -261,7 +265,7 @@ REGISTRY = [
     },
     {
         "name": "run_tool",
-        "description": "调用 vendor/ 里的白名单 CLI 工具（sqlmap/commix/fuxploider/blindx/4-zero-3 等），命令行参数直接传。调用前先看工具是否 ready。",
+        "description": "调用 vendor/ 里的白名单 CLI 工具。按漏洞类型选工具：SQLi→sqlmap、命令注入→commix、文件上传→fuxploider、XSS扫描→dalfox、盲XSS→blindx、WAF绕过→waf-bypass。命令行参数直接传（tool+args 两个参数），调用前先看工具是否 ready。",
         "parameters": _obj({
             "tool": {"type": "string", "description": "工具名，如 sqlmap / commix / fuxploider / blindx / 4-zero-3"},
             "args": {"type": "string", "description": "传给工具的命令行参数，如 '-u http://target?id=1 --batch'"},

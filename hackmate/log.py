@@ -21,7 +21,7 @@ RESULT_KINDS = {"skill", "vuln", "case"}
 
 KEY_STEP_TOOLS = {
     "open_new_tab", "navigate", "find_xss_entries", "verify_xss",
-    "fill_form", "click", "save_project",
+    "fill_form", "click", "save_project", "run_tool", "search_cve",
 }
 
 
@@ -45,6 +45,11 @@ def record_step(name: str, args: dict, result: str = "") -> None:
         entry["url"] = args.get("url", "")
     elif name in ("fill_form", "click"):
         entry["selector"] = args.get("selector", "")
+    elif name == "run_tool":
+        entry["vendor"] = args.get("tool", "")
+        entry["cmd_args"] = args.get("args", "")
+    elif name == "search_cve":
+        entry["keyword"] = args.get("keyword", args.get("component", ""))
     if name == "verify_xss":
         try:
             entry["status"] = json.loads(result).get("status", "")
