@@ -222,11 +222,19 @@ class CDPClient:
         return wait_for_cdp(self.host, self.port, timeout=25)
 
     def _resilient(self, index, op, tab_id=None, test_tab=False):
-        """跑 op(tab)；WS 卡死(超时/断开)或端点连不上则重启 Chrome、重取 tab、重试一次，仍失败才抛。"""
+        """跑 op(tab)；WS 卡死(超时/断开)或端点连不上则先清残留 dialog 重试，仍失败才重启 Chrome、重取 tab、重试一次。"""
         try:
             tab = self.ensure_test_tab() if test_tab else self._get_tab(index, tab_id)
             return op(tab)
         except _WS_ERRORS + (CDPConnError,):
+            # XSS alert 卡住 target 会让 Runtime.evaluate 报 Connection timed out，
+            # 这不是 Chrome 死，先清 dialog 重试，避免误判卡死→反复重启 Chrome。
+            self.clear_dialogs(test_tab=test_tab)
+            try:
+                tab = self.ensure_test_tab() if test_tab else self._get_tab(index, tab_id)
+                return op(tab)
+            except _WS_ERRORS + (CDPConnError,):
+                pass
             if not self.restart():
                 raise
             if test_tab:
@@ -366,7 +374,50 @@ class CDPClient:
                 }
             return json.dumps(result, ensure_ascii=False)
         finally:
+            # 清掉可能残留的 dialog：XSS payload 的 alert 若在 wait 窗口外才触发，
+            # 会卡住 target 的 JS 执行，导致后续 CDP 操作 Connection timed out（进而误判卡死→重启 Chrome）。
+            try:
+                ws.send(json.dumps({"id": 98, "method": "Page.handleJavaScriptDialog",
+                                    "params": {"accept": True}}))
+            except Exception:
+                pass
             ws.close()
+
+    def clear_dialogs(self, tab=None, test_tab=False):
+        """恢复被残留 alert/confirm/prompt 卡住的 target。
+
+        实测：alert 卡住 target 后，handleJavaScriptDialog 可能返回 'No dialog is showing'（检测不可靠），
+        但导航到 about:blank 总能恢复 target。本方法只在 _resilient 超时后调用（target 已坏），故无条件导航。
+        """
+        try:
+            t = tab
+            if t is None:
+                t = self.ensure_test_tab() if test_tab else self._get_tab(0)
+            ws = websocket.create_connection(t["ws"], timeout=5)
+            try:
+                # 尽力 accept（若有 dialog 正好清掉）
+                try:
+                    ws.send(json.dumps({"id": 0, "method": "Page.enable", "params": {}}))
+                    ws.settimeout(1.0)
+                    try:
+                        json.loads(ws.recv())
+                    except Exception:
+                        pass
+                    ws.send(json.dumps({"id": 1, "method": "Page.handleJavaScriptDialog",
+                                        "params": {"accept": True}}))
+                    ws.settimeout(1.0)
+                    try:
+                        json.loads(ws.recv())
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                # 导航到 about:blank 恢复 target（无论是否有 dialog）
+                ws.send(json.dumps({"id": 2, "method": "Page.navigate", "params": {"url": "about:blank"}}))
+            finally:
+                ws.close()
+        except Exception:
+            pass
 
     def read_page_text(self, tab=None, timeout=10, test_tab=False):
         if test_tab:
