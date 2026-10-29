@@ -425,5 +425,21 @@
     "principle": "DOM XSS: default URL param flows to document.write sink unescaped",
     "source": "dvwa",
     "verify_url": "http://localhost:8081/vulnerabilities/xss_d/?default={payload}"
+  },
+  {
+    "id": "auto-20261029225111",
+    "context": "DVWA medium Stored XSS (guestbook). Name 字段 (txtName) 仅通过 str_replace('<script>','') 过滤 (大小写敏感、只删script标签)，message 字段被 htmlspecialchars 编码。Name 值存入数据库后每次访问 /vulnerabilities/xss_s/ 都在 guestbook 列表内以 raw HTML 回显。",
+    "reference_payload": "<img src=x onerror=alert(1)>",
+    "principle": "script 标签过滤绕过：用 <img src=x onerror=> 等非 script 标签的自动触发事件，持久化存储后每次访问执行",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_s/"
+  },
+  {
+    "id": "auto-20261029225155",
+    "context": "DVWA medium DOM XSS. URL 参数 default 的值在客户端 JS 中被拼进 document.write 的 option 标签 (sink=document.write)。medium 仅检查参数是否含 '<script' 字面量，命中则回退 English。",
+    "reference_payload": "<img src=x onerror=alert(1)>",
+    "principle": "document.write sink breakout：用非 script 标签 img onerror 绕过只拦 <script 的过滤，客户端 DOM 直接执行",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_d/?default=<img src=x onerror=alert(1)>"
   }
 ]

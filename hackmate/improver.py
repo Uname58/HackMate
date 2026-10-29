@@ -7,10 +7,11 @@
 from .llm import LLMError
 
 _IMPROVER_SYS = (
-    "你是 HackMate 的 skill 改进器。skill 是给渗透测试副驾驶用的「可操作知识」，不是教科书。"
-    "硬性要求：只写可操作的测试方法 / 绕过手法 / payload 模板 / 踩过的坑；"
-    "不写定义（XSS 是什么）、影响（Impact）、防御建议（Defense/CSP/HttpOnly）、工具清单、参考链接；"
-    "每个 section 必须「能直接拿去用」，否则删掉；保持精简，宁短勿长。"
+    "你是 HackMate 的 skill 改进器。skill 是给渗透测试副驾驶用的「判断规则」，不是 payload 字典，也不是教科书。"
+    "核心要求：把知识写成「什么信号 → 怎么做」的判断规则（判据、决策步骤、什么情况下停/换思路）。"
+    "payload 只是规则的附注——每条规则最多配 1 个最小示例，不要堆一列孤立 payload；payload 靠现场按上下文构造，不背。"
+    "硬性禁止：定义（XSS 是什么）、影响（Impact）、防御建议（Defense/CSP/HttpOnly）、工具清单、参考链接。"
+    "每个 section 必须「能直接拿去判断」，否则删掉；保持精简，宁短勿长。"
     "只输出改进后的完整 skill 内容（markdown），不要任何解释或代码块标记。"
 )
 
@@ -33,9 +34,10 @@ def generate_candidate(cfg, base_client, vuln, variant, current, failures):
     prompt = f"当前 {vuln}/{variant} 的 skill 内容：\n\n{current}\n\n"
     if failures:
         prompt += (
-            "\n以下 case 当前判分失败，说明 skill 在这些场景有缺口。"
-            "请对比「参考解」与「失败产出」，找出当前知识为何没能引导出可行 payload，"
-            "补上能覆盖这类上下文的【通用方法/绕过模板/判定规则】——不要把参考解原样抄进去：\n"
+            "\n以下 case 当前判分失败，说明 skill 在这些场景有判断缺口。"
+            "请对比「参考解」与「失败产出」，找出当前判断规则为何没能引导出可行 payload，"
+            "补上能覆盖这类上下文的【判定规则/决策步骤】——提炼成「什么信号 → 怎么做」，"
+            "不要把参考解原样抄成 payload 模板：\n"
         )
         for f in failures[:8]:
             prompt += (
