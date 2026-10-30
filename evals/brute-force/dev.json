@@ -5,5 +5,12 @@
     "reference_payload": "POST /vulnerabilities/brute/ username=admin&password=password&Login=Login  (带 user_token 与 Cookie security=medium)",
     "principle": "无锁定+无真限速，sleep 仅拖慢每次尝试；用小字典逐个提交凭据，靠响应文案差异（incorrect vs Welcome）判定命中",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030140907",
+    "context": "DVWA Brute Force high：GET /vulnerabilities/brute/ 登录，字段 username/password/Login/user_token。high 有 CSRF token（checkToken 对比 $_SESSION['session_token']）+ 失败 sleep(rand(0,3)) 延迟，但无账号锁定/尝试次数限制。user_token 每次加载页面 generateSessionToken() 可获得，逐次刷新即可持续尝试。错误密码返回 'Username and/or password incorrect.'，正确返回 'Welcome to the password protected area admin'。用正确凭据 admin/password 成功登录；坏 token 提交返回 'CSRF token is incorrect'（证明 token 确实被校验、需带有效 token）。",
+    "reference_payload": "GET /vulnerabilities/brute/?username=admin&password=password&Login=Login&user_token=<从页面获取的有效token>",
+    "principle": "CSRF token 每次加载页面可获取且不绑定尝试、延迟仅 rand(0,3)s 无锁定——每次先取 token 再提交猜测即可持续爆破，token/延迟不阻止字典攻击",
+    "source": "dvwa"
   }
 ]
