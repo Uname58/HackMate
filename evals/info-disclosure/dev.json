@@ -11,5 +11,17 @@
       "url": "http://localhost:8888/workshop/api/shop/orders/{payload}",
       "match": "card_number"
     }
+  },
+  {
+    "id": "auto-20261030211101",
+    "context": "cicd-goat Duchess关(CTFd id=4)。Wonderland/duchess是PyJWT仓库,移除了.pypirc但git历史保留。commit 3259534 \"remove pypi token\"删除了含PyPI token的.pypirc,旧版本可从git show恢复。",
+    "reference_payload": "git clone Wonderland/duchess; git log --all | grep pypi; git show 3259534 -> .pypirc 中 password=pypi-<REDACTED-cicd-goat-duchess-token>",
+    "principle": "秘密被写进配置文件后删除,但git历史不可变仍保留旧commit中的明文凭据;通过git log搜索\"remove token/pypirc\"类commit并git show即可恢复泄露的PyPI API token。",
+    "source": "cicd-goat",
+    "evidence": {
+      "url": "http://localhost:3000/Wonderland/duchess",
+      "verify": "echo",
+      "match": "git show 3259534 显示 .pypirc 中 password = pypi-AgEIcHlwaS5vcmc... ，提交到CTFd返回 status:correct"
+    }
   }
 ]
