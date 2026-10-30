@@ -92,16 +92,20 @@ def write_skill(vuln: str, variant: str, content: str, backup: bool = True) -> s
 
 
 def rollback_skill(vuln: str, variant: str) -> bool:
-    """回滚到最近一次备份。"""
+    """回滚：有备份则恢复到最近一次备份；无备份（本次新建的文件）则直接删除。"""
     p = get_variant_path(vuln, variant)
     bak_dir = p.parent / "backups"
     baks = sorted(bak_dir.glob(f"{variant}.md.bak-*")) if bak_dir.exists() else []
-    if not baks:
-        return False
-    latest = baks[-1]
-    p.write_text(latest.read_text(encoding="utf-8"), encoding="utf-8")
-    latest.unlink()
-    return True
+    if baks:
+        latest = baks[-1]
+        p.write_text(latest.read_text(encoding="utf-8"), encoding="utf-8")
+        latest.unlink()
+        return True
+    # 无备份 = 本次新建的文件，回滚即删除（否则 gate 判回滚了文件却残留）
+    if p.exists():
+        p.unlink()
+        return True
+    return False
 
 
 def summary() -> str:
