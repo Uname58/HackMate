@@ -117,7 +117,7 @@ def sample_hidden_round(vuln: str, size: int = 10) -> list:
 _PRODUCE_PROMPT = (
     "你是渗透测试专家。根据以下漏洞知识：\n\n{content}\n\n"
     "针对场景：{context}\n\n"
-    "只输出一个 XSS payload，不要任何解释或代码块。"
+    "只输出一个针对 {vuln} 漏洞的 payload，不要任何解释或代码块。"
 )
 
 
@@ -139,10 +139,10 @@ def score_group(cases, content, produce_client, judges, cdp, trials, tag, job=No
             job.set_progress(f"{tag} {i}/{len(cases)} {c.get('id', '?')}")
         last_payload, last_ok = "", False
         for _ in range(trials):
-            prompt = _PRODUCE_PROMPT.format(content=content, context=grader.ctx(c))
+            prompt = _PRODUCE_PROMPT.format(content=content, context=grader.ctx(c), vuln=vuln or "目标")
             try:
                 payload = produce_client.ask(prompt)
-                ok, how = grader.grade(c, payload, judges=judges, cdp=cdp)
+                ok, how = grader.grade(c, payload, judges=judges, cdp=cdp, vuln=vuln)
                 consecutive_failures = 0
             except LLMError:
                 payload, ok, how = "<llm-error>", False, "error"

