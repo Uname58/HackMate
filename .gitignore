@@ -22,6 +22,7 @@ tools/cdp/launcher/build/
 tools/cdp/launcher/dist/
 
 # 备份 + 临时文件（不进仓库）
+tmp/
 *.bak
 *.bak_*
 skills.bak_*/
