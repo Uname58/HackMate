@@ -12,5 +12,12 @@
     "reference_payload": "127.0.0.1 | id",
     "principle": "命令分隔符黑名单不完整：过滤了 ; 和 && 却漏掉管道符 |，用 | 拼接第二条命令即可命令执行（回显 uid=33(www-data)）",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030134419",
+    "context": "DVWA Command Injection high：ping 表单 POST /vulnerabilities/exec/ 的 ip 字段拼进系统命令。high 用黑名单做替换过滤（$substitutions），其中把 '| ' (竖线+空格) 替换为空，但竖线后不跟空格（'|cmd'）的管道符未被过滤。用 127.0.0.1|whoami 绕过，回显 www-data，|id 回显 uid=33(www-data)。",
+    "reference_payload": "127.0.0.1|whoami   (POST ip=127.0.0.1|whoami&Submit=Submit 到 /vulnerabilities/exec/)",
+    "principle": "黑名单只过滤 '| '（竖线+空格），遗漏了无空格的管道分隔符 '|cmd'；用 127.0.0.1|whoami 注入执行命令",
+    "source": "dvwa"
   }
 ]

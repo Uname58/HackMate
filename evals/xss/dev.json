@@ -449,5 +449,12 @@
     "principle": "script 标签黑名单过滤绕过：改用 img onerror 事件处理器自动触发 JS",
     "source": "dvwa",
     "verify_url": "http://localhost:8081/vulnerabilities/xss_r/?name={payload}"
+  },
+  {
+    "id": "auto-20261030134626",
+    "context": "DVWA XSS Reflected high：/vulnerabilities/xss_r/ 的 name 参数反射到页面。high 用黑名单只过滤 <script>（大小写不敏感删除），其它标签与事件处理器未被过滤。用 <img src=x onerror=alert(1)> 绕过，verify_xss CONFIRMED（观察到 javascriptDialogOpening alert(1)）。",
+    "reference_payload": "?name=<img src=x onerror=alert(1)>",
+    "principle": "黑名单只删 <script> 标签，改用 img 标签的 onerror 事件处理器执行 JS，绕过 script 过滤",
+    "source": "dvwa"
   }
 ]

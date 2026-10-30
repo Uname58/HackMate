@@ -6,5 +6,12 @@
     "principle": "仅靠客户端可伪造的 Content-Type + 伪造文件头（magic bytes）绕过 MIME 校验：multipart 里 content-type 由攻击者控制设为 image/jpeg，文件体加 JPEG 魔数骗取校验通过，实际扩展名仍为 .php 从而被服务器当 PHP 脚本解析 → RCE。",
     "source": "dvwa",
     "verify_url": "http://localhost:8081/hackable/uploads/cmd.php?cmd=id"
+  },
+  {
+    "id": "auto-20261030135818",
+    "context": "DVWA File Upload high：/vulnerabilities/upload/ 表单字段 uploaded。high 校验：$uploaded_ext(最后一个点后)∈{jpg,jpeg,png} && size<100000 && getimagesize($tmp)。保存用原 basename 到 /hackable/uploads/。绕过内容校验(getimagesize)：上传「合法 PNG(IEND 完整) + 追加 <?php echo 49; ?>」的 polyglot，getimagesize 只读图片头判定为合法 PNG 而放行，PHP 代码随图片落地 /hackable/uploads/poc2.png，view-source 可见 PNG 字节 + <?php echo 49; ?>。扩展名 whitelist 也以 .png 通过。注：本机 Apache 仅 .php$ 经 FilesMatch 执行，.png/.php.jpg 不解析，故未直接 RCE，但内容伪造绕过成立、任意内容落在 web 可访问目录。",
+    "reference_payload": "multipart POST /vulnerabilities/upload/  uploaded=@file(名称 poc2.png, content-type image/png, 内容=1x1 PNG 完整字节 + \"<?php echo 49; ?>\")",
+    "principle": "内容伪造(polyglot)：合法图片头通过 getimagesize 内容校验，尾部追加 PHP webshell 随图片一起被接受并落地；扩展名校验只看最后一个点后缀(.png)也通过",
+    "source": "dvwa"
   }
 ]
