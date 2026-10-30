@@ -1,6 +1,6 @@
-# HackMate v3
+# HackMate v4
 
-AI 渗透测试副驾驶（human-in-the-loop）。人类主导，AI 辅助侦察 / 分析 / 验证。当前聚焦 Reflected XSS。
+AI 渗透测试副驾驶（human-in-the-loop）。人类主导，AI 辅助侦察 / 分析 / 验证。多漏洞类型（XSS / SQLi / RCE / 文件上传 / 文件包含 / CSRF / 逻辑漏洞 …），按需加载知识 + 工具编排。
 
 两条产品线：
 - **CLI**（`chat.py`）—— 对话式打靶。
@@ -8,7 +8,7 @@ AI 渗透测试副驾驶（human-in-the-loop）。人类主导，AI 辅助侦察
 
 核心卖点是「自主变强闭环」：打靶 → 沉淀 case → 带 eval gate 改 skill → 涨保留 / 跌回滚。
 
-> 版本线：v1 初版 · v2 从 0 重写解决闭环「跑不动」的两个根本问题（见 `DESIGN.md`）· v3 新增本地 Web 工作台。
+> 版本线：v1 初版 · v2 从 0 重写解决闭环「跑不动」的两个根本问题（见 `DESIGN.md`）· v3 新增本地 Web 工作台 · v4 扩多漏洞类型 + 按需加载 + 工具编排（见 `DESIGN.md`）。
 
 ## 快速开始
 
@@ -19,7 +19,7 @@ python chat.py                    # CLI 对话
 python chat.py web                # 启动本机 Web 工作台（http://127.0.0.1:8765）
 ```
 
-## Web 工作台（v3）
+## Web 工作台
 
 `python chat.py web` 在 `127.0.0.1:8765` 起一个本地服务（纯标准库 `http.server`，无前端构建链），自动打开浏览器。界面：
 
