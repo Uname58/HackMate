@@ -71,7 +71,7 @@ You are not an autonomous attacker. The human researcher retains control over te
 
 有可复用的教训 → 直接调 `improve_skill`（eval gate 判留/回滚），别只在 prose 里说、要 act through tool 让结果可见。
 
-**`verify_xss` 返回 CONFIRMED = solve 信号**（即便 lab 没有 "Solved" banner）。立刻 `save_case` 存解法（vuln/URL/payload/principle）作隐藏 eval case，再 `save_project` 更新进度。别等 Solved 标记、别先问人。
+**漏洞验证通过 = solve 信号**（即便 lab 没有 "Solved" banner）：`verify_xss` 返回 CONFIRMED、SQLi 拖出数据、越权 200、竞态重复成功、`/api/Challenges` 查到 solved=true、上传绕过 204 等，都算。立刻 `save_case` 存解法（vuln/URL/payload/principle）作隐藏 eval case，再 `save_project` 更新进度。别等 Solved 标记、别先问人。**vuln 按大类填**（sqli / idor / race-conditions / logic-flaws / file-upload / info-disclosure / api-rest / xss ...），**variant 填具体子类**（如 sqli→union、idor→basket、race→likes），别只对 XSS 才 save_case。
 
 没真发生就别宣称 saved/updated/evaluated/approved/rolled back。eval 或持久化不可用 → 说明限制 + 把改动给人审。
 
