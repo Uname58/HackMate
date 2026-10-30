@@ -456,5 +456,19 @@
     "reference_payload": "?name=<img src=x onerror=alert(1)>",
     "principle": "黑名单只删 <script> 标签，改用 img 标签的 onerror 事件处理器执行 JS，绕过 script 过滤",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030140121",
+    "context": "DVWA XSS Stored high：嘉宾簿 /vulnerabilities/xss_s/，Name 字段(txtName) 只做 preg_replace('/<(.*)s(.*)c(.*)r(.*)i(.*)p(.*)t/i','') + mysqli_real_escape_string，无 htmlspecialchars/strip_tags，存入 guestbook 表后在页面回显。Message 字段(mtxMessage) 有 strip_tags+htmlspecialchars 被中和。用 Name 提交 <img src=x onerror=alert(1)>（无 script 序列，绕过正则），存入后在每次访问 xss_s 页面触发。verify_xss 观察 javascriptDialogOpening alert(1)。",
+    "reference_payload": "POST /vulnerabilities/xss_s/ txtName=<img src=x onerror=alert(1)>&mtxMessage=hi&btnSign=Sign+Guestbook",
+    "principle": "Name 字段过滤只删含 script 序列的标签、未做 HTML 转义；<img onerror> 无 s-c-r-i-p-t 序列绕过，payload 持久存储，每次访问页面自动执行",
+    "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030140301",
+    "context": "DVWA XSS DOM high：/vulnerabilities/xss_d/ 服务端 source/high.php 只对 $_GET['default'] 做 switch 白名单(仅 French/English/German/Spanish，否则 302 到 ?default=English)。但客户端 JS 在 index.php 里读 document.location.href.indexOf(\"default=\")，substring 取 default= 之后的整段并 document.write 进 <option value='...'>text</option>。服务端看不到 URL fragment。绕过：default=English 通过白名单，payload 放 # 后 → JS 读取 href 含 fragment → document.write 注入 <img src=x onerror=alert(1)> 执行。verify_xss CONFIRMED alert(1)。",
+    "reference_payload": "http://localhost:8081/vulnerabilities/xss_d/?default=English#<img src=x onerror=alert(1)>",
+    "principle": "服务端只校验 query 的 default 值，客户端 sink 用完整 location.href 含 #fragment；把 payload 放 URL fragment，服务端白名单照过，前端 document.write 执行",
+    "source": "dvwa"
   }
 ]

