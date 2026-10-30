@@ -1,0 +1,9 @@
+[
+  {
+    "id": "auto-20261030132849",
+    "context": "DVWA Brute Force medium：登录表单 admin/password，medium 仅在失败分支加 MySQL sleep(2) 延迟，无账号锁定/限速。错误密码返回 'Username and/or password incorrect.'，正确密码返回 'Welcome to the password protected area admin'。用正确字典即可爆破成功，延迟不阻止猜测。",
+    "reference_payload": "POST /vulnerabilities/brute/ username=admin&password=password&Login=Login  (带 user_token 与 Cookie security=medium)",
+    "principle": "无锁定+无真限速，sleep 仅拖慢每次尝试；用小字典逐个提交凭据，靠响应文案差异（incorrect vs Welcome）判定命中",
+    "source": "dvwa"
+  }
+]

