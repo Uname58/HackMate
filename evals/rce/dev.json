@@ -5,5 +5,12 @@
     "reference_payload": "127.0.0.1; id",
     "principle": "OS command injection via shell metacharacter chaining (;)",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030122151",
+    "context": "DVWA medium Command Injection ('Ping a device'). 输入 ip 被拼接到 ping 命令。Medium 用黑名单过滤 ; 和 &&（str_replace），但未过滤 | 和 ||，管道符可绕过执行任意命令。",
+    "reference_payload": "127.0.0.1 | id",
+    "principle": "命令分隔符黑名单不完整：过滤了 ; 和 && 却漏掉管道符 |，用 | 拼接第二条命令即可命令执行（回显 uid=33(www-data)）",
+    "source": "dvwa"
   }
 ]
