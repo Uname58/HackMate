@@ -40,6 +40,15 @@ def _h_save_case(args, ctx):
     }
     if args.get("verify_url"):
         case["verify_url"] = args["verify_url"]
+    if args.get("evidence"):
+        evidence = args["evidence"]
+        if isinstance(evidence, str):
+            try:
+                evidence = json.loads(evidence)
+            except json.JSONDecodeError:
+                evidence = None
+        if isinstance(evidence, dict):
+            case["evidence"] = evidence
     # 打过的靶场=训练材料，写 dev（improver 可见）；regression+hidden 是留出考卷，不经此写入
     result = ev.append_case(vuln, "dev", case)
     log.record("case", vuln=vuln, context=case["context"],
@@ -264,6 +273,10 @@ def _h_find_xss_entries(args, ctx):
     return _cdp(ctx).find_xss_entries(test_tab=True)
 
 
+def _h_enumerate_site(args, ctx):
+    return _cdp(ctx).enumerate_site(args["url"], test_tab=True)
+
+
 def _h_verify_xss(args, ctx):
     result = _cdp(ctx).verify_xss(args["url"], test_tab=True)
     try:
@@ -299,6 +312,7 @@ REGISTRY = [
             "reference_payload": {"type": "string", "description": "成功触发漏洞的 payload/请求（作为参考解）"},
             "principle": {"type": "string", "description": "绕过手法/原理关键词，如「JS 字符串 breakout」「UNION 列数对齐拖库」「竞态窗口重复提交」"},
             "verify_url": {"type": "string", "description": "可选：含 {payload} 占位的可复跑 URL 模板，用于日后真验"},
+            "evidence": {"type": "object", "description": "可选：客观证据定义，判分时脱离 LLM 评委核对真值。格式 {\"verify\":\"echo|delay|alert\",\"url\":\"含 {payload} 的 URL 模板\",\"match\":\"回显关键词或延迟秒数\"}。echo=回显匹配（RCE 的 whoami/LFI 的 /etc/passwd/SQLi 拖库字段值）、delay=延迟秒数（盲注 sleep）、alert=XSS 弹窗"},
             "source": {"type": "string", "description": "来源，如 xss-labs / portswigger / dvwa / juice-shop / auto"},
         }, ["vuln", "context", "reference_payload"]),
         "handler": _h_save_case,
@@ -414,6 +428,14 @@ REGISTRY = [
         "description": "扫描 HackMate 专用测试标签的 XSS 注入点候选（输入框、表单、URL 参数、带参数链接）",
         "parameters": _obj({}),
         "handler": _h_find_xss_entries,
+    },
+    {
+        "name": "enumerate_site",
+        "description": "从入口 URL 枚举攻击面：URL 参数、表单（action/method/字段）、输入框、同源链接、JS 文件、JS 里的 API 端点。开放式侦察第一步——真实资产没给定参数，先用这个扫出可注入的攻击面，再逐个打。返回 JSON。",
+        "parameters": _obj({
+            "url": {"type": "string", "description": "入口 URL，如 http://localhost:8083/ 或 http://target.com/"},
+        }, ["url"]),
+        "handler": _h_enumerate_site,
     },
     {
         "name": "verify_xss",

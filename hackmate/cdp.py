@@ -361,6 +361,50 @@ class CDPClient:
         return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
                                test_tab=test_tab)
 
+    def enumerate_site(self, url, index=0, test_tab=False):
+        """从入口 URL 枚举攻击面：URL 参数 / 表单 / 输入框 / 同源链接 / JS 文件 / JS API 端点。
+
+        这是开放式侦察的核心——真实资产没有「给定参数」这一步，要先从页面自己扫出攻击面。
+        一次 JS 调用收集全部，返回 JSON。同源链接供后续逐页爬取（depth 由 LLM 决定递归几层）。
+        """
+        def op(tab):
+            self._cdp_cmd(tab["ws"], "Page.navigate", {"url": url})
+            time.sleep(1.2)
+            js = r"""
+(function(){
+    const out = {url: location.href, origin: location.origin,
+        url_params: Array.from(new URLSearchParams(location.search).keys()),
+        forms: [], inputs: [], textareas: [], selects: [],
+        links: [], js_files: [], api_endpoints: []};
+    document.querySelectorAll('form').forEach(f => {
+        out.forms.push({action: f.action || '', method: (f.method || 'get').toLowerCase(),
+            fields: Array.from(f.querySelectorAll('input,select,textarea')).map(el =>
+                ({name: el.name || '', type: el.type || el.tagName.toLowerCase()}))
+        });
+    });
+    document.querySelectorAll('input').forEach(el => out.inputs.push({name: el.name||'', type: el.type||'', id: el.id||''}));
+    document.querySelectorAll('textarea').forEach(el => out.textareas.push({name: el.name||'', id: el.id||''}));
+    document.querySelectorAll('select').forEach(el => out.selects.push({name: el.name||'', id: el.id||''}));
+    document.querySelectorAll('a[href]').forEach(a => {
+        try {
+            const u = new URL(a.href, location.origin);
+            if (u.origin === location.origin && !out.links.includes(u.pathname + u.search)) {
+                out.links.push(u.pathname + u.search);
+            }
+        } catch(e) {}
+    });
+    document.querySelectorAll('script[src]').forEach(s => out.js_files.push(s.src));
+    const inline = Array.from(document.querySelectorAll('script')).map(s => s.textContent).join('\n');
+    const re = /(?:fetch|axios|XMLHttpRequest|url\s*:|\.get\s*\(|\.post\s*\()\s*['"`]([^'"`]+)['"`]/g;
+    let m;
+    while ((m = re.exec(inline)) !== null) out.api_endpoints.push(m[1]);
+    out.api_endpoints = Array.from(new Set(out.api_endpoints));
+    return JSON.stringify(out);
+})()
+"""
+            return self._cdp_eval(tab["ws"], js)
+        return self._resilient(index, op, test_tab=test_tab)
+
     def verify_xss(self, url, index=0, wait=4, autotrigger=True, test_tab=False):
         """黑盒验证：导航到带 payload 的 URL，监听 alert 弹窗（弹=JS 真执行=XSS 成立）。
 
