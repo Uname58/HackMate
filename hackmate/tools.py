@@ -135,18 +135,36 @@ def _h_run_shell(args, ctx):
         return "需要 command 参数"
     tmp = (app_root() / "tmp").resolve()
     tmp.mkdir(parents=True, exist_ok=True)
+    proc = None
     try:
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
-        r = subprocess.run(cmd, shell=True, cwd=str(tmp), capture_output=True,
-                           text=True, encoding="utf-8", errors="replace",
-                           env=env, timeout=120)
-        out = (r.stdout or "") + ("\n[stderr]\n" + r.stderr if r.stderr else "")
-        if len(out) > 6000:
-            out = out[:6000] + "\n…[输出截断]"
-        return out.strip() or f"（无输出，退出码 {r.returncode}）"
+        # Windows 上 shell=True 的子进程树不会被 timeout 终止（已知坑：cmd.exe 被 terminate 但
+        # 它 spawn 的子进程仍持有 stdout/stderr 管道，subprocess 会永久阻塞）。
+        # 用 CREATE_NEW_PROCESS_GROUP + taskkill /T 才能连根杀掉进程树。
+        kwargs = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        proc = subprocess.Popen(cmd, shell=True, cwd=str(tmp), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                                errors="replace", env=env, **kwargs)
+        out, err = proc.communicate(timeout=120)
+        text = (out or "") + ("\n[stderr]\n" + err if err else "")
+        if len(text) > 6000:
+            text = text[:6000] + "\n…[输出截断]"
+        return text.strip() or f"（无输出，退出码 {proc.returncode}）"
     except subprocess.TimeoutExpired:
-        return "（执行超时 120s，已终止）"
+        if proc is not None:
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                                   capture_output=True)
+                else:
+                    proc.kill()
+                proc.communicate()
+            except Exception:
+                pass
+        return "（执行超时 120s，已终止进程树）"
     except Exception as e:
         return f"（执行失败：{e}）"
 
