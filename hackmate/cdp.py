@@ -289,6 +289,44 @@ class CDPClient:
         return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
                                test_tab=test_tab)
 
+    def upload_file(self, selector, file_path, index=0, test_tab=False):
+        """通过 CDP DOM.setFileInputFiles 上传本地文件到 file input。
+
+        这是浏览器自动化上传文件的标准做法：JS 的 value setter 对 file input 被浏览器
+        安全限制禁止（报 may only be programmatically set to the empty string），必须走
+        CDP 协议。file_path 是运行 Chrome 的机器上的绝对路径（HackMate 跑 Windows 原生，
+        所以传 Windows 路径，如 C:\\...\\tmp\\shell.jpg）。
+        三个命令（getDocument→querySelector→setFileInputFiles）在同一 WS 连接内完成，
+        保证 nodeId 有效。
+        """
+        if not _HAS_WS:
+            raise CDPError("缺少 websocket-client")
+
+        def op(tab):
+            ws = websocket.create_connection(tab["ws"], timeout=20)
+            try:
+                def cmd(method, params, mid):
+                    ws.send(json.dumps({"id": mid, "method": method, "params": params}))
+                    while True:
+                        msg = json.loads(ws.recv())
+                        if msg.get("id") == mid:
+                            return msg
+                doc = cmd("DOM.getDocument", {}, 1)
+                root_id = doc.get("result", {}).get("root", {}).get("nodeId")
+                if root_id is None:
+                    return "DOM.getDocument 未返回 root nodeId"
+                q = cmd("DOM.querySelector", {"nodeId": root_id, "selector": selector}, 2)
+                file_id = q.get("result", {}).get("nodeId")
+                if not file_id:
+                    return f"未找到 file input 元素: {selector}"
+                r = cmd("DOM.setFileInputFiles", {"nodeId": file_id, "files": [file_path]}, 3)
+                if r.get("error"):
+                    return f"上传失败: {r['error'].get('message', '')}"
+                return f"已上传 {file_path} 到 {selector}"
+            finally:
+                ws.close()
+        return self._resilient(index, op, test_tab=test_tab)
+
     def click(self, selector, index=0, test_tab=False):
         js = (
             "(function(){"

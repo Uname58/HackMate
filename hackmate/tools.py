@@ -228,6 +228,34 @@ def _h_fill_form(args, ctx):
     return _cdp(ctx).fill_form(args["selector"], args["value"], test_tab=True)
 
 
+def _h_upload_file(args, ctx):
+    return _cdp(ctx).upload_file(args["selector"], args["file_path"], test_tab=True)
+
+
+def _h_write_file(args, ctx):
+    """把文件写到 HackMate tmp 目录（造 polyglot 图片马等二进制文件用）。"""
+    import base64
+    from .config import app_root
+    name = args.get("path", "")
+    content_b64 = args.get("content_base64", "")
+    if not name or not content_b64:
+        return "需要 path 和 content_base64 参数"
+    tmp = (app_root() / "tmp").resolve()
+    tmp.mkdir(parents=True, exist_ok=True)
+    target = (tmp / name).resolve()
+    if not str(target).startswith(str(tmp)):
+        return "非法路径：只允许写进 tmp 目录"
+    try:
+        data = base64.b64decode(content_b64)
+    except Exception as e:
+        return f"base64 解码失败：{e}"
+    try:
+        target.write_bytes(data)
+    except Exception as e:
+        return f"写文件失败：{e}"
+    return f"已写 {len(data)} 字节到 {target}"
+
+
 def _h_click(args, ctx):
     return _cdp(ctx).click(args["selector"], test_tab=True)
 
@@ -354,6 +382,24 @@ REGISTRY = [
             "value": {"type": "string", "description": "要填的值"},
         }, ["selector", "value"]),
         "handler": _h_fill_form,
+    },
+    {
+        "name": "write_file",
+        "description": "把文件写到 HackMate tmp 目录（造 polyglot 图片马等二进制文件用）。content_base64 传 base64 编码的文件内容，支持二进制。返回文件绝对路径（Windows 路径），配合 upload_file 上传用。",
+        "parameters": _obj({
+            "path": {"type": "string", "description": "文件名，如 shell.jpg，只能写进 tmp 目录（不能含 ../ 目录穿越）"},
+            "content_base64": {"type": "string", "description": "base64 编码的文件内容（二进制文件先 base64）"},
+        }, ["path", "content_base64"]),
+        "handler": _h_write_file,
+    },
+    {
+        "name": "upload_file",
+        "description": "把本地文件通过 CDP DOM.setFileInputFiles 上传到页面的 file input（绕过浏览器 JS 安全限制）。文件上传类漏洞专用：先 write_file 造 polyglot 文件，再 upload_file 上传，最后 click 提交表单。file_path 用 write_file 返回的绝对路径。",
+        "parameters": _obj({
+            "selector": {"type": "string", "description": "file input 的 CSS selector，如 input[name=upload_file] 或 input[type=file]"},
+            "file_path": {"type": "string", "description": "本地文件绝对路径（write_file 返回的 Windows 路径）"},
+        }, ["selector", "file_path"]),
+        "handler": _h_upload_file,
     },
     {
         "name": "click",
