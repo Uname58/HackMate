@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030201034",
+    "context": "crAPI /workshop/api/shop/orders/{id} 订单响应内嵌完整支付卡信息(card_number/owner/expiry/transaction_id)，前端展示订单无需这些字段，属 API 过度数据暴露",
+    "reference_payload": "GET /workshop/api/shop/orders/7 → payment.card_number=XXXXXXXXXXXX8376, card_owner_name=UserTwo, card_expiry=08/2030",
+    "principle": "API 过度数据暴露：响应返回敏感的支付卡字段，客户端不需要却被下发，结合 BOLA 可批量窃取他人卡信息",
+    "source": "crapi",
+    "verify_url": "http://localhost:8888/workshop/api/shop/orders/{payload}",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8888/workshop/api/shop/orders/{payload}",
+      "match": "card_number"
+    }
+  }
+]

