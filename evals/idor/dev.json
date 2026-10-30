@@ -1,0 +1,14 @@
+[
+  {
+    "id": "auto-20261030175546",
+    "context": "XVWA IDOR 关：GET 参数 item 直接按数字取商品记录，无授权/归属校验，改 item 值可枚举全部商品(1=Affogato/2=Americano/3=Bicerin)，越界值(999)报SQL错。",
+    "reference_payload": "GET ?item=1 → Affogato; ?item=2 → Americano; ?item=3 → Bicerin（顺序枚举全部记录）",
+    "principle": "IDOR: item 直接对象引用无归属校验，改数字枚举不同记录（1=Affogato XVWA0987, 2=Americano XVWA3876, 3=Bicerin）",
+    "source": "xvwa",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/idor/?item=2",
+      "match": "Americano"
+    }
+  }
+]

