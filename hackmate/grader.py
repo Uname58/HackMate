@@ -102,14 +102,18 @@ def judge_consensus(case, payload, judges, vuln=""):
     return True if any_judged else None
 
 
-def browser_verify(case, payload, cdp, index=0):
+def browser_verify(case, payload, cdp, index=0, vuln=""):
     """金标准：case 带含 {payload} 占位的 verify_url 且 cdp 可用 → 真跑看 alert。
 
-    返回 True/False，或 None（无 verify_url / 无占位 / 无 cdp，跳过此级）。
+    返回 True/False，或 None（无 verify_url / 无占位 / 无 cdp / 非 XSS，跳过此级）。
+    目前浏览器金标准只支持 XSS（verify_xss 检测 alert 弹窗），非 XSS 漏洞的 verify_url
+    无法用 alert 判，必须跳过交给评委，否则 LFI/SQLi/RCE 的 payload 会被 verify_xss 误判为失败。
     """
     url = case.get("verify_url")
     if not url or "{payload}" not in url or cdp is None:
         return None
+    if vuln and vuln != "xss":
+        return None  # 非 XSS：浏览器金标准不适用，落到评委
     try:
         full = url.replace("{payload}", quote(payload, safe=""))
         import json
@@ -124,7 +128,7 @@ def grade(case, payload, judges=None, cdp=None, index=0, vuln=""):
     if not payload:
         return False, "empty"
 
-    b = browser_verify(case, payload, cdp, index)
+    b = browser_verify(case, payload, cdp, index, vuln=vuln)
     if b is not None:
         return b, "browser"
 

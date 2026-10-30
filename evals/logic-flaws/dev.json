@@ -1,0 +1,9 @@
+[
+  {
+    "id": "auto-20261030130844",
+    "context": "DVWA medium Weak Session IDs 实验。点击 Generate 按钮，服务端 Set-Cookie: dvwaSession=<value>。medium 直接用 PHP time() 生成，即 Unix 时间戳（如 1793336916、1793336920、1793336921），连续且可预测。",
+    "reference_payload": "POST /vulnerabilities/weak_id/  Generate=Generate → Set-Cookie: dvwaSession=1793336916 (Unix 时间戳，每次点击递增)",
+    "principle": "会话 ID 用 time() 生成 = Unix 时间戳，单调递增可预测/可枚举，攻击者可在时间窗内猜出他人 session id",
+    "source": "dvwa"
+  }
+]
