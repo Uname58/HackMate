@@ -1,0 +1,28 @@
+[
+  {
+    "id": "auto-20261030203319",
+    "context": "XVWA /xvwa/vulnerabilities/sessionflaws/ + login.php: session_start() 后登录不调用 session_regenerate_id()，攻击者预先设定 PHPSESSID 即可在受害者登录后固定/劫持会话",
+    "reference_payload": "先设 Cookie PHPSESSID=fixation1234567890abcdef → 受害者用该会话 POST login.php admin 登录 → 用同一 PHPSESSID 访问得到 \"Welcome Admin\"",
+    "principle": "会话固定：登录前后 session id 不变，攻击者预设 id 后受害者认证即可劫持会话",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/sessionflaws/",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/sessionflaws/",
+      "match": "Welcome Admin"
+    }
+  },
+  {
+    "id": "auto-20261030204003",
+    "context": "XVWA sessionflaws：登录成功后服务端不重置 PHPSESSID，登录前后的会话 ID 完全相同(=kqtmina5h71... 保持不变)。攻击者可预先构造已知 PHPSESSID 诱使受害者登录，之后用同一 ID 劫持已认证会话。",
+    "reference_payload": "1) 攻击者设 Cookie: PHPSESSID=attackerfixedsessid123456 并诱导受害者登录；2) 受害者 POST /xvwa/login.php (admin/admin) 时携带该 PHPSESSID；3) 攻击者请求 GET /xvwa/vulnerabilities/sessionflaws/ 带 Cookie: PHPSESSID=attackerfixedsessid123456 -> 响应含 \"Welcome\"(已认证)",
+    "principle": "登录后未轮换 session id（session fixation）：认证前后 PHPSESSID 不变，攻击者预设已知会话 ID 让受害者登录，该 ID 即绑定认证态，攻击者复用同一 ID 即可冒充已登录用户。",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/sessionflaws/",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/sessionflaws/",
+      "match": "用预设固定 PHPSESSID 登录后，另一客户端带同一 PHPSESSID 访问返回含 Welcome（已认证）"
+    }
+  }
+]

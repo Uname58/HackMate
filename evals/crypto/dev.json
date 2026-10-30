@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030204122",
+    "context": "XVWA crypto 关卡：提交文本后页面展示\"Base64 Encode\"值，实际就是标准 base64(item)，无密钥无盐可任意可逆还原；同时声明\"AES Encryption Key Size : 32\"却未输出密文(该分支在本环境 PHP5.5.9 直接截断崩溃)。属于把编码当加密、硬编码密钥、加密实现缺陷的不安全密码学使用。",
+    "reference_payload": "GET /xvwa/vulnerabilities/crypto/?item=SECRET999 -> 页面 \"Base64 Encode: U0VDUkVUOTk5\"，base64 解码 == SECRET999；另页面显示\"AES Encryption Key Size : 32\"硬编码密钥且无密文输出",
+    "principle": "将 Base64 编码当作加密：输出=标准base64(明文)，任何人可直接解码还原敏感数据；并硬编码32字节AES密钥、加密分支实现崩溃，属不安全加密实现导致敏感数据可泄露。",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/crypto/?item={payload}",
+    "evidence": {
+      "url": "http://localhost:8084/xvwa/vulnerabilities/crypto/?item={payload}",
+      "verify": "echo",
+      "match": "返回表格 Base64 Encode 值 == base64(payload)，解码即还原明文（如 SECRET999 -> U0VDUkVUOTk5）"
+    }
+  }
+]

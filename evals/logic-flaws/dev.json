@@ -32,5 +32,18 @@
       "url": "http://localhost:8888/identity/api/v2/user/dashboard",
       "match": "100090"
     }
+  },
+  {
+    "id": "auto-20261030203300",
+    "context": "XVWA /xvwa/vulnerabilities/missfunc/ delete 按钮只在 admin 会话时于 HTML 输出，但后端 action=delete 分支无任何 role 校验，未登录也能删商品",
+    "reference_payload": "GET /xvwa/vulnerabilities/missfunc/?item=11&action=delete （无需登录/无需admin）→ \"Item deleted successfully.\"",
+    "principle": "缺失功能级访问控制(BFLA)：敏感功能仅靠前端隐藏按钮，服务端未校验权限，直接构造 action=delete 即越权删除",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/missfunc/?item={payload}&action=delete",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/missfunc/?item={payload}&action=delete",
+      "match": "Item deleted successfully"
+    }
   }
 ]

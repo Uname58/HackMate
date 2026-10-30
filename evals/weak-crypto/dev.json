@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030203351",
+    "context": "XVWA /xvwa/vulnerabilities/crypto/ 源码用 md5($str) 无盐哈希 + AES 硬编码 32 字节密钥(pack('H*',\"bcb04b7e...\"))+ MCRYPT_RAND 弱随机 IV；且 users 表密码用无盐 md5 存储。注:该容器未装 mcrypt,AES/MD5 运行行会 fatal,Base64 行正常",
+    "reference_payload": "users表 admin 密码=21232f297a57a5a743894a0e4a801fc3=md5(\"admin\")；xvwa=570992ec4b5ad7a313f5dc8fd0825395=md5(\"xvwa\")。均无盐 md5,可直接彩虹表反查",
+    "principle": "不安全加密：密码用无盐 MD5 存储/哈希(可彩虹表破解)，AES 密钥硬编码在源码、IV 用弱随机 MCRYPT_RAND",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/vulnerabilities/crypto/?item={payload}",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/vulnerabilities/crypto/?item={payload}",
+      "match": "Base64 Encode"
+    }
+  }
+]

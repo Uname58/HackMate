@@ -32,5 +32,18 @@
       "url": "http://localhost:8083/Pass-16/index.php",
       "match": "P16OK"
     }
+  },
+  {
+    "id": "auto-20261030203236",
+    "context": "XVWA /xvwa/vulnerabilities/fileupload/ 无任何扩展名/MIME 校验，直接 move_uploaded_file 到 /xvwa/img/uploads/，可上传 .php 并执行。(环境需先存在 img/uploads/ 目录，原镜像缺失)",
+    "reference_payload": "multipart POST image=@pwn.php;type=image/jpeg + item/desc/categ/price → 落地 /xvwa/img/uploads/pwn.php，访问返回 XVWA_PWNED_49",
+    "principle": "无限制文件上传：不校验类型/扩展名即可上传 webshell 到 web 目录，直接 RCE",
+    "source": "xvwa",
+    "verify_url": "http://localhost:8084/xvwa/img/uploads/{payload}",
+    "evidence": {
+      "verify": "echo",
+      "url": "http://localhost:8084/xvwa/img/uploads/{payload}",
+      "match": "XVWA_PWNED_49"
+    }
   }
 ]
