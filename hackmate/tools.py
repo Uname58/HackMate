@@ -121,6 +121,77 @@ def _h_run_tool(args, ctx):
         return f"（执行失败：{e}）"
 
 
+def _h_run_shell(args, ctx):
+    """执行 shell 命令（curl/管道/写文件/Python 脚本）。cwd 固定 tmp 目录，shell=True 让管道重定向生效。
+
+    这是补「执行通路缺 shell」的关键：文件上传的 multipart POST、二次渲染的本地 GD diff、
+    任意命令回显验证，都靠它。⚠️ 只用于打靶范围内的合法操作，别执行破坏性命令。
+    """
+    import subprocess
+    import os
+    from .config import app_root
+    cmd = args.get("command", "")
+    if not cmd:
+        return "需要 command 参数"
+    tmp = (app_root() / "tmp").resolve()
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        r = subprocess.run(cmd, shell=True, cwd=str(tmp), capture_output=True,
+                           text=True, encoding="utf-8", errors="replace",
+                           env=env, timeout=120)
+        out = (r.stdout or "") + ("\n[stderr]\n" + r.stderr if r.stderr else "")
+        if len(out) > 6000:
+            out = out[:6000] + "\n…[输出截断]"
+        return out.strip() or f"（无输出，退出码 {r.returncode}）"
+    except subprocess.TimeoutExpired:
+        return "（执行超时 120s，已终止）"
+    except Exception as e:
+        return f"（执行失败：{e}）"
+
+
+def _h_race(args, ctx):
+    """并发发 N 个请求（条件竞争抢窗口 / 爆破）。Python 多线程，非顺序调用。"""
+    import threading
+    import urllib.request
+    import urllib.error
+    import time
+    from collections import Counter
+    url = args.get("url", "")
+    method = args.get("method", "GET").upper()
+    try:
+        count = int(args.get("count", 20))
+    except (TypeError, ValueError):
+        count = 20
+    if not url:
+        return "需要 url 参数"
+    results = []
+    lock = threading.Lock()
+
+    def worker(i):
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(url, method=method)
+            with urllib.request.urlopen(req, timeout=8) as r:
+                code = r.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        except Exception as e:
+            code = f"err:{str(e)[:30]}"
+        with lock:
+            results.append({"i": i, "status": str(code), "dt": round(time.time() - t0, 3)})
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    dist = Counter(r["status"] for r in results)
+    return json.dumps({"count": count, "status_dist": dict(dist),
+                       "sample": results[:5]}, ensure_ascii=False)
+
+
 def _h_search_cve(args, ctx):
     """查 CVE：调 NVD API 按组件/关键词搜。限流约 5s/次，别频繁调用。"""
     import urllib.request, urllib.parse
@@ -334,6 +405,24 @@ REGISTRY = [
             "args": {"type": "string", "description": "传给工具的命令行参数，如 '-u http://target?id=1 --batch'"},
         }, ["tool"]),
         "handler": _h_run_tool,
+    },
+    {
+        "name": "run_shell",
+        "description": "执行 shell 命令（curl/管道/写文件/Python 脚本）。补执行通路缺 shell 的关键：文件上传的 multipart POST、二次渲染的本地 GD diff、任意命令回显验证都靠它。cwd 固定 tmp 目录，timeout 120s。只用于打靶范围内合法操作。",
+        "parameters": _obj({
+            "command": {"type": "string", "description": "shell 命令，如 'curl -s -F upload_file=@shell.jpg http://target/upload.php' 或 'python gen_img.py'"},
+        }, ["command"]),
+        "handler": _h_run_shell,
+    },
+    {
+        "name": "race",
+        "description": "并发发 N 个请求（Python 多线程，非顺序），用于条件竞争抢窗口 / 爆破。返回状态码分布。",
+        "parameters": _obj({
+            "url": {"type": "string", "description": "目标 URL"},
+            "count": {"type": "integer", "description": "并发请求数，默认 20"},
+            "method": {"type": "string", "description": "HTTP 方法 GET/POST，默认 GET"},
+        }, ["url"]),
+        "handler": _h_race,
     },
     {
         "name": "search_cve",
