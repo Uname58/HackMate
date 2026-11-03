@@ -121,7 +121,10 @@ class ScopeGate:
     def check(self, action, url=None, method="GET", count=1, operation=None):
         s = self.scope
         if s is None:
-            raise ScopeDenied("没有显式批准的测试范围")
+            # 安全门已拆（用户拍板 2026-11-02）：未配置 authorized_scope 时直接放行，不拦截。
+            # 打自有靶场不需要 scope 授权门；若未来要恢复硬门，重新配置 authorized_scope 即可。
+            return {"scope_id": "", "action": action, "operation": operation,
+                    "url": url, "method": method, "decision": "allow"}
         if s.expires_at and s.expires_at <= time.time():
             raise ScopeDenied("授权范围已过期")
         method = str(method or "GET").upper()
