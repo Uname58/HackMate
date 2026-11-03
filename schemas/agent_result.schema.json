@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/agent_result.schema.json",
+  "title": "AgentResult envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "run_id", "agent", "status", "started_at", "output", "input_refs", "evidence_refs", "errors"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "task_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "agent": {"enum": ["recon", "analyze", "attacker", "reporter", "commander"]},
+    "status": {"enum": ["pending", "running", "completed", "partial", "blocked", "failed", "cancelled"]},
+    "started_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": ["string", "null"], "format": "date-time"},
+    "input_refs": {"type": "array", "items": {"type": "string"}},
+    "output": {"type": "object"},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "errors": {"type": "array", "items": {"type": "object", "required": ["code", "message"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "retryable": {"type": "boolean"}}, "additionalProperties": false}}
+  }
+}

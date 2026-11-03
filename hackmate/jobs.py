@@ -50,6 +50,10 @@ class Job:
     def cancelled(self) -> bool:
         return self._cancel.is_set()
 
+    @property
+    def cancel_event(self):
+        return self._cancel
+
     def check_cancel(self) -> None:
         """执行函数在关键点调用：若已请求取消则抛 JobCancelled 退出。"""
         if self._cancel.is_set():

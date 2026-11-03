@@ -46,5 +46,22 @@
     "desc": "PHP 后渗透 C2 框架",
     "ready": false,
     "note": "工具作者明确不支持 Windows（代码写死 sys.exit），仅 Kali/Linux"
+  },
+  "wafw00f": {
+    "entry": "python -m wafw00f.main",
+    "desc": "识别目标网站使用的 WAF（Cloudflare/AWS WAF/ModSecurity/Imperva 等 ~150 种指纹）",
+    "ready": true
+  },
+  "wpscan": {
+    "entry": "docker run --rm wpscanteam/wpscan",
+    "desc": "WordPress 专用扫描：枚举 theme/plugin/version + 已知漏洞",
+    "ready": true,
+    "note": "Docker 运行；查 CVE 需 WPVulnDB API token（免费每日 25 次，无 token 只能做基础枚举）"
+  },
+  "whatweb": {
+    "entry": "docker run --rm azurielus/whatweb",
+    "desc": "技术栈指纹识别（CMS/框架/服务器/JS 库，~1800 指纹）",
+    "ready": true,
+    "note": "Docker 运行（azurielus/whatweb 社区镜像，已实测可用）"
   }
 }

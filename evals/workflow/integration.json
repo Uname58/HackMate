@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Deterministic offline workflow acceptance cases; no live target or model calls.",
+  "cases": [
+    {"id": "scope-deny-stops-before-recon", "condition": "scope validator denies", "expected_status": "BLOCKED", "expected_stages": []},
+    {"id": "role-adapters-run-offline-through-commander", "condition": "fake model and browser adapters execute the real five-role wiring without network requests", "expected_status": "COMPLETED", "expected_stages": ["recon", "analyze", "attacker", "reporter", "commander"]},
+    {"id": "reporter-runs-after-inconclusive-attack", "condition": "attacker result is inconclusive", "expected_status": "COMPLETED", "expected_stages": ["recon", "analyze", "attacker", "reporter"]},
+    {"id": "reporter-feedback-runs-one-bounded-cycle", "condition": "Reporter requests more evidence; Commander reruns Analyze, Attacker, and Reporter within the task retry budget", "expected_status": "COMPLETED", "expected_stages": ["recon", "analyze", "attacker", "reporter"], "expected_retry_count": 1, "expected_stage_runs": {"analyze": 2, "attacker": 2, "reporter": 2}},
+    {"id": "accepted-without-independent-evidence-is-partial", "condition": "reporter accepts without reviewed refs", "expected_status": "PARTIAL", "expected_stages": ["recon", "analyze", "attacker", "reporter"]},
+    {"id": "accepted-without-supporting-evidence-refs-is-partial", "condition": "reporter lists reviewed evidence but no supporting reference", "expected_status": "PARTIAL", "expected_stages": ["recon", "analyze", "attacker", "reporter"]},
+    {"id": "recovery-does-not-replay-saved-attacker", "condition": "process interrupted in reporter after attacker result persisted", "expected_status": "COMPLETED", "expected_stages": ["reporter"]},
+    {"id": "recovery-blocks-uncertain-attacker-replay", "condition": "process interrupted in attacker before result persisted", "expected_status": "MANUAL_REVIEW", "expected_stages": []},
+    {"id": "request-quota-is-shared-across-stages", "condition": "a task reaches its request cap during Attacker after Recon; scope-only validation does not consume a request", "expected_status": "COMPLETED", "expected_stages": ["recon", "analyze", "attacker", "reporter", "commander"]},
+    {"id": "reporter-generates-reviewed-writeup", "condition": "Reporter accepts only after reviewing evidence and stores a schema-checked Finding plus a sanitized reproducible writeup", "expected_status": "COMPLETED", "expected_stages": ["recon", "analyze", "attacker", "reporter", "commander"]}
+  ]
+}

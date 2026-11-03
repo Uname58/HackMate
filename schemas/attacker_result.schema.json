@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/attacker_result.schema.json",
+  "title": "AttackerResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["test_id", "hypothesis_id", "execution_status", "payloads", "tool_requests", "attempts", "execution_refs", "browser_events", "evidence_refs", "result", "reason", "limitations"],
+  "properties": {
+    "test_id": {"type": "string"},
+    "hypothesis_id": {"type": "string"},
+    "execution_status": {"enum": ["completed", "partial", "blocked", "failed", "cancelled"]},
+    "payloads": {"type": "array", "items": {"type": "string"}},
+    "tool_requests": {"type": "array", "items": {"type": "object", "required": ["tool", "args"], "properties": {"tool": {"type": "string"}, "args": {"type": "object"}}, "additionalProperties": false}},
+    "attempts": {"type": "array", "maxItems": 5, "items": {"type": "object", "required": ["attempt", "tool_request", "execution_ref", "result", "evidence_refs"], "properties": {"attempt": {"type": "integer", "minimum": 1}, "tool_request": {"type": "object", "required": ["tool", "args"], "properties": {"tool": {"type": "string"}, "args": {"type": "object"}}, "additionalProperties": false}, "execution_ref": {"type": "string", "minLength": 1}, "result": {"enum": ["CONFIRMED", "NOT_CONFIRMED", "INCONCLUSIVE", "BLOCKED", "ERROR"]}, "evidence_refs": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}},
+    "execution_refs": {"type": "array", "items": {"type": "string"}},
+    "browser_events": {"type": "array", "items": {"type": "string"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "result": {"enum": ["CONFIRMED", "NOT_CONFIRMED", "INCONCLUSIVE", "BLOCKED", "ERROR"]},
+    "reason": {"type": "string"},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}

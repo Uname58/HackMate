@@ -11,7 +11,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from urllib.robotparser import RobotFileParser
 import webbrowser
 
@@ -21,6 +21,7 @@ from .llm import LLMClient, LLMCancelled, LLMError
 from . import log, memory
 from .repl import HELP, build_system_prompt
 from .tools import ToolContext, dispatch, schemas
+from .security import ScopeDenied, ScopeGate
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_CHAT_CHARS = 12000
@@ -81,12 +82,51 @@ class _AnchorParser(HTMLParser):
         self.hrefs = []
         self.base_href = ""
 
+
+class _ReconRedirectHandler(HTTPRedirectHandler):
+    """Recheck every redirect made by the legacy direct Recon helper."""
+
+    def __init__(self, scope_gate):
+        super().__init__()
+        self.scope_gate = scope_gate
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.scope_gate.check("OBSERVE", url=newurl, method=req.get_method(), operation="web_recon")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         if tag.lower() == "base" and not self.base_href:
             self.base_href = attrs.get("href", "")
         elif tag.lower() == "a" and attrs.get("href"):
             self.hrefs.append(attrs["href"])
+
+
+class _FormParser(HTMLParser):
+    """收集页面表单：action、method、字段名/类型。用于 drawer 详情展示。"""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.forms = []
+        self._current = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag.lower() == "form":
+            self._current = {"action": attrs.get("action", ""),
+                             "method": (attrs.get("method") or "GET").upper(),
+                             "fields": []}
+            self.forms.append(self._current)
+        elif tag.lower() == "input" and self._current is not None:
+            self._current["fields"].append({"name": attrs.get("name", ""),
+                                            "type": attrs.get("type", "text")})
+        elif tag.lower() in ("select", "textarea") and self._current is not None:
+            self._current["fields"].append({"name": attrs.get("name", ""),
+                                            "type": tag.lower()})
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "form":
+            self._current = None
 
 
 def _natural_sort_key(value):
@@ -106,11 +146,34 @@ def _safe_url(url):
         host = parts.netloc
         path = parts.path or "/"
         label = path
+        params = []
+        if parts.query:
+            from urllib.parse import parse_qsl
+            params = [{"name": k, "value": v} for k, v in parse_qsl(parts.query)]
         return {"origin": f"{parts.scheme}://{host}", "host": host,
                 "path": path, "label": label,
-                "url": f"{parts.scheme}://{host}{parts.path}"}
+                "url": f"{parts.scheme}://{host}{parts.path}",
+                "method": "GET", "status": None,
+                "params": params, "form": [], "cookies": [],
+                "tech": "", "waf": "", "vulns": [], "cves": []}
     except (ValueError, UnicodeError):
         return None
+
+
+def _registered_domain(host):
+    """提取注册域名（母域名），如 www.example.com -> example.com。"""
+    host = host.split(":", 1)[0]  # 去掉端口
+    labels = host.split(".")
+    if len(labels) <= 2:
+        return host
+    return ".".join(labels[-2:])
+
+
+def _same_domain(host, target_host):
+    """判断 host 是否属于 target_host 的母域名（含子域）。用于过滤无关页面。"""
+    if not target_host:
+        return False
+    return _registered_domain(host) == _registered_domain(target_host)
 
 
 class WebSession:
@@ -133,16 +196,21 @@ class WebSession:
         self._recon = {"running": False, "origin": "", "visited": 0,
                        "found": 0, "error": ""}
         self._recon_action_id = None
+        self._target = None
+        self._recon_file = Path(__file__).resolve().parent.parent / "memorys" / "recon.json"
         self._job_states = {}
+        self._workflow_state = {"task_id": "", "job_id": None, "status": "", "summary": ""}
+        self._workflow_service_instance = None
         self._cdp = None
         self._cdp_checked_at = 0.0
         self._cdp_check_interval = 4.0
         self._cdp_refresh_lock = threading.Lock()
         self._cdp_error = ""
-        self._tool_ctx = ToolContext(self.cfg, self.client, self.jobs, self._get_cdp)
+        self._tool_ctx = ToolContext(self.cfg, self.client, self.jobs, self._get_cdp, self._record_finding, self._get_target)
         # 页面和对话先立即可用；CDP 探测在后台运行，失联时不阻塞 Web 请求。
         self._cdp_error = "CDP 未连接"
         self._refresh_cdp()
+        self._load_recon()
 
     def _get_cdp(self):
         if self._cdp is not None:
@@ -167,9 +235,10 @@ class WebSession:
             return
         try:
             found = []
+            target_host = self._target["host"] if self._target else None
             for tab in cdp.list_tabs():
                 item = _safe_url(tab.get("url"))
-                if item:
+                if item and target_host and _same_domain(item["host"], target_host):
                     found.append(item)
             with self._lock:
                 for item in found:
@@ -182,26 +251,48 @@ class WebSession:
     def start_recon(self, origin=None):
         with self._lock:
             targets = self._site_tree()
-        allowed_origins = {target["origin"] for target in targets}
-        if not allowed_origins:
-            return False, "还没有发现目标网站；先在 Chrome 中打开目标页面。"
-        selected = str(origin or targets[0]["origin"]).rstrip("/")
-        if selected not in allowed_origins:
-            return False, "Recon 只能扫描左侧结构树中已发现的网站。"
-        with self._lock:
+            if self._busy or self._workflow_job_active():
+                return False, "HackMate 正在处理上一条消息"
             if self._recon["running"]:
-                return False, "Recon 正在运行。"
-            self._recon = {"running": True, "origin": selected,
-                           "visited": 0, "found": 0, "error": ""}
-            action = self._push_action("recon", {"url": selected},
-                                       status="running", result="准备扫描同源页面…")
-            self._recon_action_id = action["id"]
-        worker = threading.Thread(target=self._run_recon, args=(selected,),
-                                  daemon=True, name="hackmate-web-recon")
-        worker.start()
+                return False, "Recon 正在运行"
+        selected = str(origin or (self._target["origin"] if self._target else (targets[0]["origin"] if targets else ""))).rstrip("/")
+        if not selected:
+            return False, "还没有目标；先在左侧输入 URL 设定目标。"
+        # 已侦察过（30 天内）→ 复用记录，不重新跑 HackMate
+        cached = self._recon_cache_count()
+        if cached > 0:
+            with self._lock:
+                self._recon = {"running": False, "origin": selected,
+                               "visited": cached, "found": cached,
+                               "error": f"复用 {cached} 页侦察记录"}
+            return True, ""
+        # 构造仔细侦察指令，让 HackMate 的 LLM 用 CDP 逐页分析（不追求快，追求仔细）
+        instruction = (
+            "对当前目标做一次仔细的入口侦察（不追求速度，逐页仔细分析）。\n\n"
+            "第一步先用 get_target 读取当前目标，然后：\n"
+            "1. 用 navigate 打开目标首页，read_page_text 看结构\n"
+            "2. 用 enumerate_site 枚举攻击面：URL 参数、表单、输入框、同源链接、JS 端点\n"
+            "3. 逐个导航到发现的关键入口（登录、账户、搜索、上传、API 等），识别每个入口的功能类型\n"
+            "4. 判断技术栈：读响应头（X-Powered-By/Server/Set-Cookie）+ 特征路径（/wp-admin=WordPress、PHPSESSID=PHP、csrf=Django 等）\n"
+            "5. 用 run_tool 调 wafw00f 识别目标用了什么 WAF（如 Cloudflare/AWS WAF/ModSecurity）\n"
+            "6. 根据入口类型 + 技术栈，判断每个入口可能存在的漏洞类型（文件上传点→file-upload、输入框/搜索→sqli/xss、URL参数→idor/ssrf 等）\n"
+            "7. 用 search_cve 查技术栈相关的已知 CVE\n"
+            "8. 对每个入口用 record_finding 记录：url、tech（技术栈）、waf（WAF 牌子，用 wafw00f 结果，不要混进 tech）、vulns（可能漏洞类型）、cves（相关 CVE）\n\n"
+            "规则：真实资产，禁止目录爆破/并发扫描/短时大量请求；逐个仔细分析，不追求快。\n"
+            "最后汇报：发现了哪些入口、每个入口是什么功能和技术栈、有哪些可测的漏洞类型。"
+        )
+        with self._lock:
+            self._recon = {"running": True, "origin": selected, "visited": 0, "found": 0, "error": ""}
+        ok, err = self.submit(instruction)
+        if not ok:
+            with self._lock:
+                self._recon = {"running": False, "origin": "", "visited": 0, "found": 0, "error": err}
+            return False, err
         return True, ""
 
     def _run_recon(self, origin):
+        gate = ScopeGate(self.cfg.get("authorized_scope"))
+        opener = build_opener(_ReconRedirectHandler(gate))
         with self._lock:
             seeds = {origin + "/"}
             seeds.update(origin + item["path"] for item in self._seen_urls.values()
@@ -215,7 +306,8 @@ class WebSession:
         robots.set_url(origin + "/robots.txt")
         try:
             request = Request(origin + "/robots.txt", headers={"User-Agent": "HackMate-Recon/1.0"})
-            with urlopen(request, timeout=3) as response:
+            gate.check("OBSERVE", url=request.full_url, method="GET", operation="web_recon")
+            with opener.open(request, timeout=3) as response:
                 robots.parse(response.read(256_000).decode("utf-8", "replace").splitlines())
         except Exception:
             # 缺少 robots.txt 时按常规站点链接继续；每次请求仍限制在当前 origin。
@@ -238,7 +330,8 @@ class WebSession:
                         "User-Agent": "HackMate-Recon/1.0",
                         "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
                     })
-                    with urlopen(request, timeout=4) as response:
+                    gate.check("OBSERVE", url=request.full_url, method="GET", operation="web_recon")
+                    with opener.open(request, timeout=4) as response:
                         final_url = response.geturl()
                         final_parts = urlsplit(final_url)
                         if f"{final_parts.scheme}://{final_parts.netloc}".lower() != origin.lower():
@@ -248,8 +341,27 @@ class WebSession:
                             continue
                         charset = response.headers.get_content_charset() or "utf-8"
                         document = response.read(_RECON_MAX_HTML_BYTES).decode(charset, "replace")
+                        # 采集 HTTP 详情：状态码、cookies
+                        status = getattr(response, "status", None)
+                        if status is None and hasattr(response, "getcode"):
+                            try:
+                                status = response.getcode()
+                            except Exception:
+                                status = None
+                        cookies = [{"name": sc.split("=", 1)[0].strip()}
+                                   for sc in (response.headers.get_all("Set-Cookie") or [])
+                                   if sc.split("=", 1)[0].strip()]
+                        if item:
+                            item["status"] = status
+                            item["cookies"] = cookies
                     parser = _AnchorParser()
                     parser.feed(document)
+                    form_parser = _FormParser()
+                    form_parser.feed(document)
+                    if item:
+                        item["form"] = [f for f in form_parser.forms if f["fields"]]
+                except ScopeDenied:
+                    raise
                 except Exception:
                     continue
 
@@ -355,6 +467,11 @@ class WebSession:
             self._actions.append(action)
             return action
 
+    def _workflow_job_active(self):
+        job_id = self._workflow_state.get("job_id")
+        job = self.jobs.get(job_id) if job_id else None
+        return bool(job and job.status in ("queued", "running"))
+
     def _finish_action(self, action_id, result, status="done"):
         with self._lock:
             for action in self._actions:
@@ -362,6 +479,112 @@ class WebSession:
                     action["result"] = str(result)[:1200]
                     action["status"] = status
                     break
+
+    def _workflow_service(self):
+        if self._workflow_service_instance is None:
+            from .config import app_root
+            from .workflow import WorkflowService
+            self._workflow_service_instance = WorkflowService(
+                self.cfg, self.client, self.jobs, self._get_cdp,
+                app_root() / "memorys" / "workflow")
+        return self._workflow_service_instance
+
+    def submit_workflow(self):
+        scope = self.cfg.get("authorized_scope")
+        if not scope or scope.get("approved") is not True:
+            return False, "未配置用户明确批准的 authorized_scope"
+        if not self._target:
+            return False, "请先设定目标 URL"
+        if self._busy or self._workflow_job_active():
+            return False, "当前已有对话或工作流在运行"
+        try:
+            import hashlib
+            origin = self._target["origin"]
+            target = {"target_id": "target_" + hashlib.sha256(origin.encode()).hexdigest()[:16],
+                      "base_url": origin + "/", "environment": "unknown"}
+            service = self._workflow_service()
+            task = service.create_task(target, scope, user_request="Web 工作台启动的授权安全测试")
+            job = self.jobs.submit(
+                "five_agent_workflow",
+                lambda background_job: service.run_task(
+                    task["task_id"], cancel_check=lambda: background_job.cancelled,
+                    cancel_event=background_job.cancel_event),
+                title=f"五 Agent 工作流 {task['task_id'][:14]}")
+            with self._lock:
+                self._workflow_state = {"task_id": task["task_id"], "job_id": job.id,
+                                        "status": "queued", "summary": "Commander 已创建任务"}
+            self._push_action("five_agent_workflow", {"url": origin}, status="running",
+                              result=f"任务 {task['task_id']} 已排队")
+            return True, dict(self._workflow_state)
+        except Exception as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+
+    def workflow_status(self, task_id):
+        task = self._workflow_service().get_task(task_id)
+        if not task:
+            return None
+        return {"task_id": task_id, "status": task["status"],
+                "completed_stages": sorted(task.get("results", {})),
+                "summary": task.get("results", {}).get("commander", {}).get("summary", ""),
+                "recovery_required": bool(task.get("recovery_required")),
+                "budget_usage": task.get("budget_usage", {}),
+                "timeline": self._workflow_service().task_timeline(task_id)}
+
+    def research_search(self, task_id, keyword):
+        return self._workflow_service().search_research(task_id, keyword)
+
+    def research_snapshot(self, task_id):
+        return self._workflow_service().research_snapshot(task_id)
+
+    def create_research_candidate(self, task_id, details):
+        return self._workflow_service().create_research_candidate(task_id, details)
+
+    def validate_research_candidate(self, task_id, payload):
+        return self._workflow_service().record_research_validation(
+            task_id, payload.get("candidate_id"), payload.get("evidence_refs"),
+            payload.get("passed"), payload.get("notes"))
+
+    def evaluate_research_candidate(self, task_id, payload):
+        service = self._workflow_service()
+        candidate_id, vuln, variant = (payload.get("candidate_id"), payload.get("vuln"), payload.get("variant"))
+        job = self.jobs.submit(
+            "research_eval",
+            lambda background_job: service.evaluate_research_candidate(
+                task_id, candidate_id, vuln, variant, job=background_job),
+            title=f"Research Eval {vuln}/{variant}")
+        action = self._push_action("research_eval", {"candidate_id": candidate_id}, status="running",
+                                  result=f"候选 Eval 已排队，Job #{job.id}")
+        action["job_id"] = job.id
+        return {"task_id": task_id, "candidate_id": candidate_id,
+                "job_id": job.id, "status": job.status}
+
+    def approve_research_candidate(self, task_id, candidate_id):
+        return self._workflow_service().approve_research_candidate(
+            task_id, candidate_id, approved_by="local_user")
+
+    def promote_research_candidate(self, task_id, payload):
+        return self._workflow_service().submit_research_promotion(
+            task_id, payload.get("candidate_id"), payload.get("vuln"), payload.get("variant"))
+
+    def _sync_workflow_state(self):
+        state = self._workflow_state
+        job_id = state.get("job_id")
+        if not job_id:
+            return dict(state)
+        job = self.jobs.get(job_id)
+        if not job:
+            return dict(state)
+        state["status"] = job.status
+        if job.status == "done" and isinstance(job.result, dict):
+            state["status"] = job.result.get("status", "done")
+            state["summary"] = job.result.get("commander_summary", "")
+        elif job.status == "failed":
+            state["summary"] = job.error
+        elif job.status == "running":
+            task = self._workflow_service().get_task(state["task_id"])
+            if task:
+                state["status"] = task.get("status", "running")
+        return dict(state)
 
     def submit(self, text):
         text = str(text or "").strip()
@@ -372,6 +595,8 @@ class WebSession:
         with self._lock:
             if self._busy:
                 return False, "HackMate 正在处理上一条消息"
+            if self._workflow_job_active():
+                return False, "五 Agent 工作流运行中，请等待完成或点击停止"
             if text == "/help":
                 self._push_action("help", status="done", result=_WEB_HELP)
                 return True, ""
@@ -404,6 +629,10 @@ class WebSession:
     def stop_current(self):
         with self._lock:
             if not self._busy or self._cancel_event is None:
+                job_id = self._workflow_state.get("job_id")
+                if job_id and self.jobs.cancel(job_id):
+                    self._workflow_state["status"] = "cancellation_requested"
+                    return True, "已请求停止五 Agent 工作流"
                 return False, "当前没有运行中的任务"
             if self._cancel_event.is_set():
                 return True, "停止请求已提交"
@@ -489,7 +718,13 @@ class WebSession:
                 self._stop_action_id = None
                 self._cancel_event = None
                 self.client.set_cancel_event(None)
+                if self._recon["running"]:
+                    origin = self._recon["origin"]
+                    count = sum(1 for item in self._seen_urls.values() if item["origin"] == origin)
+                    self._recon = {"running": False, "origin": origin,
+                                   "visited": count, "found": count, "error": ""}
                 self._busy = False
+            self._save_recon()
 
     def _sync_jobs(self):
         for job in self.jobs.list_jobs():
@@ -507,16 +742,143 @@ class WebSession:
             self._finish_action(action["id"], result, status)
 
     def _site_tree(self):
-        groups = {}
+        """三级树：母域名（如 example.com）→ 子域名（origin）→ 路径。"""
+        roots = {}
+        target_host = self._target["host"] if self._target else None
         for item in self._seen_urls.values():
-            root = groups.setdefault(item["origin"], {"origin": item["origin"], "host": item["host"], "pages": {}})
-            root["pages"][item["path"]] = dict(item)
-        return [{"origin": group["origin"], "host": group["host"],
-                 "pages": sorted(group["pages"].values(), key=lambda p: _natural_sort_key(p["path"]))}
-                for group in sorted(groups.values(), key=lambda x: x["host"])]
+            if target_host and not _same_domain(item["host"], target_host):
+                continue
+            domain = _registered_domain(item["host"])
+            subs = roots.setdefault(domain, {})
+            subs.setdefault(item["origin"], {"origin": item["origin"], "host": item["host"], "pages": {}})
+            subs[item["origin"]]["pages"][item["path"]] = dict(item)
+        return [
+            {"domain": domain,
+             "subdomains": [
+                 {"origin": s["origin"], "host": s["host"],
+                  "pages": sorted(s["pages"].values(), key=lambda p: _natural_sort_key(p["path"]))}
+                 for s in sorted(subs.values(), key=lambda x: x["host"])
+             ]}
+            for domain, subs in sorted(roots.items())
+        ]
+
+    def _load_tools(self):
+        """读 vendor/tools.json，返回真实工具清单（name/desc/ready/note）。"""
+        vendor_dir = Path(__file__).resolve().parent.parent / "vendor"
+        tools_file = vendor_dir / "tools.json"
+        tools = []
+        if tools_file.is_file():
+            try:
+                registry = json.loads(tools_file.read_text(encoding="utf-8"))
+                for name, meta in registry.items():
+                    tools.append({
+                        "name": name,
+                        "desc": meta.get("desc", ""),
+                        "ready": bool(meta.get("ready", False)),
+                        "note": meta.get("note", ""),
+                    })
+            except (ValueError, OSError):
+                pass
+        return tools
+
+    def set_target(self, url):
+        """用户设定渗透目标：解析 URL 存为当前目标。"""
+        item = _safe_url(url)
+        if not item:
+            return False, "无效 URL（需 http/https 开头）"
+        with self._lock:
+            old_host = self._target["host"] if self._target else None
+            same_domain = bool(old_host and _same_domain(item["host"], old_host))
+            self._target = {"origin": item["origin"], "host": item["host"]}
+            if not same_domain:
+                # 换到不同母域名：清空旧目标记录，只留新首页
+                self._seen_urls.clear()
+                self._seen_urls[item["origin"] + "/"] = item
+            elif item["origin"] + "/" not in self._seen_urls:
+                self._seen_urls[item["origin"] + "/"] = item
+        self._save_recon()
+        return True, self._target
+
+    def _get_target(self):
+        """返回当前目标（供 get_target 工具读取）。"""
+        return dict(self._target) if self._target else None
+
+    def _recon_cache_count(self):
+        """当前目标（母域名）已有的侦察记录数（排除 set_target 加的首页）。>0 表示侦察过。"""
+        if not self._target:
+            return 0
+        host = self._target["host"]
+        home_key = self._target["origin"] + "/"
+        return sum(1 for key, item in self._seen_urls.items()
+                   if key != home_key and _same_domain(item["host"], host))
+
+    def _record_finding(self, finding):
+        """把 HackMate 对某入口的判断（tech/vulns/cves）写进站点树 item。"""
+        item = _safe_url(finding.get("url", ""))
+        if not item:
+            return "无效 URL"
+        key = item["origin"] + item["path"]
+        tech = finding.get("tech", "") or ""
+        waf = finding.get("waf", "") or ""
+        vulns = finding.get("vulns", []) or []
+        cves = finding.get("cves", []) or []
+        with self._lock:
+            existing = self._seen_urls.get(key)
+            if existing:
+                existing["tech"] = tech
+                existing["waf"] = waf
+                existing["vulns"] = vulns
+                existing["cves"] = cves
+            else:
+                item["tech"] = tech
+                item["waf"] = waf
+                item["vulns"] = vulns
+                item["cves"] = cves
+                self._seen_urls[key] = item
+        self._save_recon()
+        return "已记录 finding"
+
+    def _load_recon(self):
+        """启动时加载历史侦察记录（站点树 + finding），只保留 30 天内的。"""
+        import datetime
+        if not self._recon_file.is_file():
+            return
+        try:
+            data = json.loads(self._recon_file.read_text(encoding="utf-8"))
+            cutoff = datetime.datetime.now() - datetime.timedelta(days=30)
+            seen_urls = data.get("seen_urls", {})
+            for key, item in seen_urls.items():
+                try:
+                    last_seen = datetime.datetime.fromisoformat(item.get("last_seen", ""))
+                except (ValueError, TypeError):
+                    last_seen = None
+                if last_seen is not None and last_seen >= cutoff:
+                    item.pop("last_seen", None)
+                    self._seen_urls[key] = item
+            if data.get("target"):
+                self._target = data.get("target")
+        except (ValueError, OSError):
+            pass
+
+    def _save_recon(self):
+        """把当前站点树 + finding 持久化到磁盘（带 last_seen 时间戳，供 30 天保留）。"""
+        import datetime
+        now = datetime.datetime.now().isoformat()
+        data = {
+            "target": dict(self._target) if self._target else None,
+            "saved_at": now,
+            "seen_urls": {key: {**item, "last_seen": now}
+                          for key, item in self._seen_urls.items()},
+        }
+        try:
+            self._recon_file.parent.mkdir(parents=True, exist_ok=True)
+            self._recon_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
 
     def state(self):
         self._refresh_cdp()
+        workflow = self._sync_workflow_state()
         with self._lock:
             self._sync_jobs()
             return {
@@ -530,14 +892,9 @@ class WebSession:
                 "cdp_connected": self._cdp is not None and not self._cdp_error,
                 "cdp_error": self._cdp_error,
                 "model": self.cfg["model"],
-                "tools": [
-                    {"id": "traffic", "name": "抓包 / 修改包", "group": "流量分析",
-                     "description": "HTTP 历史、请求编辑与重放", "status": "未接入"},
-                    {"id": "xsstrike", "name": "XSStrike", "group": "安全测试",
-                     "description": "XSS 检测与 payload 分析", "status": "未配置"},
-                    {"id": "hackmate", "name": "HackMate 浏览器工具", "group": "安全测试",
-                     "description": "CDP 页面侦察与验证", "status": "可用"},
-                ],
+                "target": dict(self._target) if self._target else None,
+                "workflow": workflow,
+                "tools": self._load_tools(),
             }
 
 
@@ -580,15 +937,29 @@ def make_handler(session, port):
             if not self._local_request():
                 self._send(403, {"error": "仅允许本机访问"})
                 return
-            if self.path == "/":
+            request_path = urlsplit(self.path).path
+            if request_path == "/":
                 page = WEB_DIR / "index.html"
                 if not page.is_file():
                     self._send(404, "工作台页面未安装", "text/plain; charset=utf-8")
                     return
                 self._send(200, page.read_text(encoding="utf-8"), "text/html; charset=utf-8")
-            elif self.path == "/api/state":
+            elif request_path == "/api/state":
                 self._send(200, session.state())
-            elif self.path == "/favicon.ico":
+            elif request_path.startswith("/api/task/"):
+                task_id = request_path[len("/api/task/"):]
+                task = session.workflow_status(task_id)
+                self._send(200 if task else 404, task or {"error": "任务不存在"})
+            elif request_path.startswith("/api/research/"):
+                task_id = request_path[len("/api/research/"):]
+                try:
+                    snapshot = session.research_snapshot(task_id)
+                    self._send(200, snapshot)
+                except KeyError:
+                    self._send(404, {"error": "任务不存在"})
+                except Exception as exc:
+                    self._send(400, {"error": f"{type(exc).__name__}: {exc}"})
+            elif request_path == "/favicon.ico":
                 self._send(204, "", "image/x-icon")
             else:
                 self._send(404, {"error": "Not found"})
@@ -597,15 +968,71 @@ def make_handler(session, port):
             if not self._local_request():
                 self._send(403, {"error": "仅允许本机访问"})
                 return
-            if self.path not in ("/api/chat", "/api/stop", "/api/recon"):
+            request_path = urlsplit(self.path).path
+            if request_path not in ("/api/chat", "/api/stop", "/api/recon", "/api/target",
+                                    "/api/task", "/api/research/search", "/api/research/candidate",
+                                    "/api/research/validation", "/api/research/evaluate",
+                                    "/api/research/approve", "/api/research/promote"):
                 self._send(404, {"error": "Not found"})
                 return
-            if self.path == "/api/stop":
+            if request_path.startswith("/api/research/"):
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length <= 0 or length > 65536:
+                        self._send(413, {"error": "请求长度无效"})
+                        return
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    task_id = str(payload.get("task_id") or "")
+                    if request_path == "/api/research/search":
+                        result = session.research_search(task_id, payload.get("keyword"))
+                        self._send(200, result)
+                    elif request_path == "/api/research/candidate":
+                        candidate = session.create_research_candidate(task_id, payload.get("candidate"))
+                        self._send(201, {"candidate": candidate})
+                    elif request_path == "/api/research/validation":
+                        if not isinstance(payload.get("passed"), bool):
+                            raise ValueError("passed must be a boolean set by the human reviewer")
+                        candidate = session.validate_research_candidate(task_id, payload)
+                        self._send(200, {"candidate": candidate})
+                    elif request_path == "/api/research/evaluate":
+                        job = session.evaluate_research_candidate(task_id, payload)
+                        self._send(202, {"job": job})
+                    elif request_path == "/api/research/approve":
+                        candidate = session.approve_research_candidate(task_id, payload.get("candidate_id"))
+                        self._send(200, {"candidate": candidate})
+                    else:
+                        job = session.promote_research_candidate(task_id, payload)
+                        self._send(202, {"job": job})
+                except KeyError:
+                    self._send(404, {"error": "任务或证据不存在"})
+                except ScopeDenied as exc:
+                    self._send(403, {"error": exc.reason})
+                except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, ValueError) as exc:
+                    self._send(400, {"error": f"请求无效：{exc}"})
+                except Exception as exc:
+                    self._send(502, {"error": f"Research 操作失败：{type(exc).__name__}: {exc}"})
+                return
+            if request_path == "/api/target":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length > 4096:
+                        self._send(413, {"error": "请求长度无效"})
+                        return
+                    payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                    ok, result = session.set_target(payload.get("url", ""))
+                    if not ok:
+                        self._send(409, {"error": result})
+                        return
+                    self._send(200, {"target": result})
+                except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                    self._send(400, {"error": "请求 JSON 无效"})
+                return
+            if request_path == "/api/stop":
                 accepted, error = session.stop_current()
                 self._send(202 if accepted else 409,
                            {"accepted": accepted, **({} if accepted else {"error": error})})
                 return
-            if self.path == "/api/recon":
+            if request_path == "/api/recon":
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                     if length > 4096:
@@ -617,6 +1044,19 @@ def make_handler(session, port):
                         self._send(409, {"error": error})
                         return
                     self._send(202, {"accepted": True})
+                except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                    self._send(400, {"error": "请求 JSON 无效"})
+                return
+            if request_path == "/api/task":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length > 4096:
+                        self._send(413, {"error": "请求长度无效"})
+                        return
+                    payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                    accepted, result = session.submit_workflow()
+                    self._send(202 if accepted else 409,
+                               {"accepted": accepted, "workflow": result} if accepted else {"error": result})
                 except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
                     self._send(400, {"error": "请求 JSON 无效"})
                 return

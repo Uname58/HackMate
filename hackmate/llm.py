@@ -26,6 +26,7 @@ class LLMCancelled(LLMError):
 
 class _RetryableError(LLMError):
     """可重试（网络超时 / 连接失败）。"""
+    retryable = True
 
 
 class LLMClient:
@@ -35,6 +36,8 @@ class LLMClient:
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
+        self.max_output_tokens = None
+        self.last_usage = None
         self.system_prompt = system_prompt
         self.messages = []
         self._cancel_event = None
@@ -77,9 +80,12 @@ class LLMClient:
         )
 
     # ---- 网络 ----
-    def _post(self, tools=None):
+    def _post(self, tools=None, max_tokens=None):
         url = f"{self.base_url}/chat/completions"
         payload = {"model": self.model, "messages": self.messages, "stream": False}
+        output_limit = max_tokens or self.max_output_tokens
+        if output_limit:
+            payload["max_tokens"] = int(output_limit)
         if tools:
             payload["tools"] = tools
         req = urllib.request.Request(
@@ -174,6 +180,7 @@ class LLMClient:
             if connection is not None:
                 connection.close()
         try:
+            self.last_usage = data.get("usage")
             return data["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
             raise LLMError(f"响应格式异常: {json.dumps(data, ensure_ascii=False)[:500]}")
@@ -200,6 +207,7 @@ class LLMClient:
         """一次性问答便捷方法（用于判分 / 评委：clear → chat → 取文本）。"""
         self.clear()
         self.messages.append({"role": "user", "content": prompt})
+        self.last_usage = None
         msg = self._post(tools=None)
         return (msg.get("content") or "").strip()
 

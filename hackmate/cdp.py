@@ -204,6 +204,115 @@ class CDPClient:
             raise CDPError(f"CDP {method} 错误: {msg['error'].get('message', '')}")
         return msg.get("result", {})
 
+    @staticmethod
+    def _scope_event(ws, msg, scope_gate, action, next_id, operation=None):
+        """Continue only in-scope browser requests while Fetch interception is active."""
+        if not scope_gate or msg.get("method") != "Fetch.requestPaused":
+            return
+        params = msg.get("params", {})
+        request = params.get("request", {})
+        try:
+            scope_gate.check(action, request.get("url", ""), request.get("method", "GET"),
+                             operation=operation)
+            method = "Fetch.continueRequest"
+            payload = {"requestId": params["requestId"]}
+        except Exception:
+            method = "Fetch.failRequest"
+            payload = {"requestId": params["requestId"], "errorReason": "BlockedByClient"}
+        ws.send(json.dumps({"id": next_id(), "method": method, "params": payload}))
+
+    def _cdp_command_with_events(self, ws, method, params, timeout, scope_gate=None,
+                                 action="OBSERVE", next_id=None, event_callback=None,
+                                 operation=None):
+        counter = [10]
+        def alloc():
+            if next_id:
+                return next_id()
+            counter[0] += 1
+            return counter[0]
+        command_id = alloc()
+        ws.send(json.dumps({"id": command_id, "method": method, "params": params or {}}))
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            ws.settimeout(min(0.5, max(0.05, deadline - time.time())))
+            try:
+                msg = json.loads(ws.recv())
+            except Exception:
+                continue
+            self._scope_event(ws, msg, scope_gate, action, alloc, operation)
+            if event_callback and msg.get("method"):
+                event_callback(ws, msg, alloc)
+            if msg.get("id") == command_id:
+                if msg.get("error"):
+                    raise CDPError(f"CDP {method} 错误: {msg['error'].get('message', '')}")
+                return msg.get("result", {})
+        raise CDPError(f"CDP {method} 等待超时")
+
+    def _scoped_eval_on(self, tab, expression, scope_gate, action, operation, timeout=10):
+        """Run a browser action while checking its network requests and redirects."""
+        ws = websocket.create_connection(tab["ws"], timeout=timeout)
+        ids = [1]
+        def alloc():
+            ids[0] += 1
+            return ids[0]
+        try:
+            self._cdp_command_with_events(ws, "Fetch.enable", {"patterns": [{"urlPattern": "*"}]},
+                                          5, scope_gate, action, alloc, operation=operation)
+            response = self._cdp_command_with_events(
+                ws, "Runtime.evaluate", {"expression": expression, "returnByValue": True},
+                timeout, scope_gate, action, alloc, operation=operation)
+            result = response.get("result", {})
+            if result.get("subtype") == "error":
+                raise CDPError(f"CDP Runtime.evaluate 错误: {result.get('description', '')}")
+            # Drain short-lived asynchronous requests triggered by click/input handlers.
+            deadline = time.time() + 1.0
+            idle_deadline = time.time() + 0.35
+            while time.time() < deadline and time.time() < idle_deadline:
+                ws.settimeout(min(0.15, max(0.03, idle_deadline - time.time())))
+                try:
+                    msg = json.loads(ws.recv())
+                except Exception:
+                    continue
+                if msg.get("method") == "Fetch.requestPaused":
+                    self._scope_event(ws, msg, scope_gate, action, alloc, operation)
+                    idle_deadline = time.time() + 0.35
+            return result.get("value", "")
+        finally:
+            try:
+                self._cdp_command_with_events(ws, "Fetch.disable", {}, 2, None, action, alloc)
+            except Exception:
+                pass
+            ws.close()
+
+    def _scoped_navigate_on(self, tab, url, scope_gate, action="OBSERVE", timeout=12):
+        ws = websocket.create_connection(tab["ws"], timeout=timeout)
+        ids = [1]
+        def alloc():
+            ids[0] += 1
+            return ids[0]
+        try:
+            self._cdp_command_with_events(ws, "Fetch.enable", {"patterns": [{"urlPattern": "*"}]}, 5,
+                                          scope_gate, action, alloc)
+            self._cdp_command_with_events(ws, "Page.enable", {}, 5, scope_gate, action, alloc)
+            self._cdp_command_with_events(ws, "Page.navigate", {"url": url}, 8,
+                                          scope_gate, action, alloc)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                result = self._cdp_command_with_events(
+                    ws, "Runtime.evaluate", {"expression": "document.readyState", "returnByValue": True},
+                    2, scope_gate, action, alloc)
+                value = result.get("result", {}).get("value")
+                if value == "complete":
+                    break
+                time.sleep(0.2)
+            return {"url": url, "state": value if "value" in locals() else "unknown"}
+        finally:
+            try:
+                self._cdp_command_with_events(ws, "Fetch.disable", {}, 2, None, action, alloc)
+            except Exception:
+                pass
+            ws.close()
+
     def _cdp_eval(self, ws_url, expression, timeout=10):
         result = self._cdp_cmd(
             ws_url, "Runtime.evaluate",
@@ -254,8 +363,12 @@ class CDPClient:
                 tab = self._get_tab(index)
             return op(tab)
 
-    def navigate(self, url, index=0, test_tab=False):
+    def navigate(self, url, index=0, test_tab=False, scope_gate=None, action="OBSERVE"):
         def op(tab):
+            if scope_gate is not None:
+                scope_gate.check(action, url, "GET")
+                self._scoped_navigate_on(tab, url, scope_gate, action)
+                return f"已在授权范围内导航到 {url}"
             self._cdp_cmd(tab["ws"], "Page.navigate", {"url": url})
             # 等待页面加载完成（轮询 readyState），否则紧随的 read_page_text 读到旧页面/about:blank
             deadline = time.time() + 12
@@ -269,7 +382,8 @@ class CDPClient:
             return f"已导航到 {url}"
         return self._resilient(index, op, test_tab=test_tab)
 
-    def fill_form(self, selector, value, index=0, test_tab=False):
+    def fill_form(self, selector, value, index=0, test_tab=False, scope_gate=None,
+                  action="TEST", operation="fill_form"):
         js = (
             "(function(){"
             f"const el=document.querySelector({json.dumps(selector)});"
@@ -286,10 +400,14 @@ class CDPClient:
             "return '已填: '+" + json.dumps(selector) + ";"
             "})()"
         )
-        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
-                               test_tab=test_tab)
+        def op(tab):
+            if scope_gate is not None:
+                return self._scoped_eval_on(tab, js, scope_gate, action, operation)
+            return self._cdp_eval(tab["ws"], js)
+        return self._resilient(index, op, test_tab=test_tab)
 
-    def upload_file(self, selector, file_path, index=0, test_tab=False):
+    def upload_file(self, selector, file_path, index=0, test_tab=False, scope_gate=None,
+                    action="TEST", operation="upload_file"):
         """通过 CDP DOM.setFileInputFiles 上传本地文件到 file input。
 
         这是浏览器自动化上传文件的标准做法：JS 的 value setter 对 file input 被浏览器
@@ -303,6 +421,10 @@ class CDPClient:
             raise CDPError("缺少 websocket-client")
 
         def op(tab):
+            if scope_gate is not None:
+                # A file selection is local until submitted; still re-check the
+                # authorized page origin before touching the browser input.
+                scope_gate.check(action, tab.get("url", ""), "GET", operation=operation)
             ws = websocket.create_connection(tab["ws"], timeout=20)
             try:
                 def cmd(method, params, mid):
@@ -327,7 +449,8 @@ class CDPClient:
                 ws.close()
         return self._resilient(index, op, test_tab=test_tab)
 
-    def click(self, selector, index=0, test_tab=False):
+    def click(self, selector, index=0, test_tab=False, scope_gate=None,
+              action="IMPACT", operation="click"):
         js = (
             "(function(){"
             f"const el=document.querySelector({json.dumps(selector)});"
@@ -336,8 +459,11 @@ class CDPClient:
             "return '已点击: '+" + json.dumps(selector) + ";"
             "})()"
         )
-        return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
-                               test_tab=test_tab)
+        def op(tab):
+            if scope_gate is not None:
+                return self._scoped_eval_on(tab, js, scope_gate, action, operation)
+            return self._cdp_eval(tab["ws"], js)
+        return self._resilient(index, op, test_tab=test_tab)
 
     def find_xss_entries(self, index=0, test_tab=False):
         js = (
@@ -361,14 +487,18 @@ class CDPClient:
         return self._resilient(index, lambda tab: self._cdp_eval(tab["ws"], js),
                                test_tab=test_tab)
 
-    def enumerate_site(self, url, index=0, test_tab=False):
+    def enumerate_site(self, url, index=0, test_tab=False, scope_gate=None):
         """从入口 URL 枚举攻击面：URL 参数 / 表单 / 输入框 / 同源链接 / JS 文件 / JS API 端点。
 
         这是开放式侦察的核心——真实资产没有「给定参数」这一步，要先从页面自己扫出攻击面。
         一次 JS 调用收集全部，返回 JSON。同源链接供后续逐页爬取（depth 由 LLM 决定递归几层）。
         """
         def op(tab):
-            self._cdp_cmd(tab["ws"], "Page.navigate", {"url": url})
+            if scope_gate is not None:
+                scope_gate.check("OBSERVE", url, "GET")
+                self._scoped_navigate_on(tab, url, scope_gate, "OBSERVE")
+            else:
+                self._cdp_cmd(tab["ws"], "Page.navigate", {"url": url})
             time.sleep(1.2)
             js = r"""
 (function(){
@@ -405,7 +535,7 @@ class CDPClient:
             return self._cdp_eval(tab["ws"], js)
         return self._resilient(index, op, test_tab=test_tab)
 
-    def verify_xss(self, url, index=0, wait=4, autotrigger=True, test_tab=False):
+    def verify_xss(self, url, index=0, wait=4, autotrigger=True, test_tab=False, scope_gate=None):
         """黑盒验证：导航到带 payload 的 URL，监听 alert 弹窗（弹=JS 真执行=XSS 成立）。
 
         三态：CONFIRMED（dialog 触发）/ INCONCLUSIVE（未触发，不能排除）/ NOT_CONFIRMED（预留）。
@@ -416,18 +546,38 @@ class CDPClient:
         if not _HAS_WS:
             raise CDPError("缺少 websocket-client")
         return self._resilient(
-            index, lambda tab: self._verify_xss_on(tab, url, wait, autotrigger),
+            index, lambda tab: self._verify_xss_on(tab, url, wait, autotrigger, scope_gate),
             test_tab=test_tab)
 
-    def _verify_xss_on(self, tab, url, wait=4, autotrigger=True):
+    def _verify_xss_on(self, tab, url, wait=4, autotrigger=True, scope_gate=None):
         ws = websocket.create_connection(tab["ws"], timeout=wait + 8)
+        ids = [0]
+        browser_events = []
+        network_events = []
+        completed_requests = []
+        document_request_ids = set()
+        def alloc():
+            ids[0] += 1
+            return ids[0]
+        def observe_event(socket, event, get_id):
+            method = event.get("method", "")
+            if method.startswith("Network."):
+                network_events.append(event)
+                if method == "Network.requestWillBeSent" and event.get("params", {}).get("type") == "Document":
+                    document_request_ids.add(event.get("params", {}).get("requestId"))
+                if method == "Network.loadingFinished":
+                    completed_requests.append(event.get("params", {}).get("requestId"))
+            elif method in ("Page.javascriptDialogOpening", "Page.frameNavigated"):
+                browser_events.append(event)
         try:
-            ws.send(json.dumps({"id": 1, "method": "Page.enable", "params": {}}))
-            while True:
-                msg = json.loads(ws.recv())
-                if msg.get("id") == 1:
-                    break
-            ws.send(json.dumps({"id": 2, "method": "Page.navigate", "params": {"url": url}}))
+            if scope_gate is not None:
+                scope_gate.check("TEST", url, "GET")
+                self._cdp_command_with_events(ws, "Fetch.enable", {"patterns": [{"urlPattern": "*"}]},
+                                              5, scope_gate, "TEST", alloc, observe_event)
+            self._cdp_command_with_events(ws, "Network.enable", {}, 5, scope_gate, "TEST", alloc, observe_event)
+            self._cdp_command_with_events(ws, "Page.enable", {}, 5, scope_gate, "TEST", alloc, observe_event)
+            self._cdp_command_with_events(ws, "Page.navigate", {"url": url}, 8,
+                                          scope_gate, "TEST", alloc, observe_event)
             deadline = time.time() + wait
             trigger_at = time.time() + 1.2 if autotrigger else None
             triggered = not autotrigger
@@ -435,7 +585,7 @@ class CDPClient:
             while time.time() < deadline:
                 if not triggered and time.time() >= trigger_at:
                     try:
-                        ws.send(json.dumps({"id": 3, "method": "Runtime.evaluate",
+                        ws.send(json.dumps({"id": alloc(), "method": "Runtime.evaluate",
                                             "params": {"expression": _XSS_TRIGGER_JS}}))
                     except Exception:
                         pass
@@ -445,9 +595,11 @@ class CDPClient:
                     msg = json.loads(ws.recv())
                 except Exception:
                     continue  # 0.3s 轮询片无消息，继续等（可能稍后才触发 dialog）
+                self._scope_event(ws, msg, scope_gate, "TEST", alloc)
+                observe_event(ws, msg, alloc)
                 if msg.get("method") == "Page.javascriptDialogOpening":
                     dialog = msg.get("params", {}).get("message", "")
-                    ws.send(json.dumps({"id": 99, "method": "Page.handleJavaScriptDialog",
+                    ws.send(json.dumps({"id": alloc(), "method": "Page.handleJavaScriptDialog",
                                         "params": {"accept": True}}))
                     break
             if dialog is not None:
@@ -456,6 +608,7 @@ class CDPClient:
                     "evidence": f"观察到 Page.javascriptDialogOpening，dialog 消息: {dialog}",
                     "reason": "alert 弹窗触发，说明注入的 JS 在该执行路径上真的执行了",
                     "scope": f"URL: {url}",
+                    "browser_events": browser_events,
                 }
             else:
                 result = {
@@ -463,16 +616,41 @@ class CDPClient:
                     "evidence": "导航完成，wait 窗口内未观察到 javascriptDialogOpening",
                     "reason": "alert 未触发不能排除 XSS：可能 CSP 拦截 / 上下文不符 / payload 不合适 / 事件未触发",
                     "scope": f"URL: {url}（黑盒验证，未读响应源码，故不判 NOT_CONFIRMED）",
+                    "browser_events": browser_events,
                 }
+            exchanges = []
+            for request_id in list(dict.fromkeys(item for item in completed_requests if item)):
+                if request_id not in document_request_ids:
+                    continue
+                try:
+                    body_result = self._cdp_command_with_events(
+                        ws, "Network.getResponseBody", {"requestId": request_id}, 3,
+                        scope_gate, "TEST", alloc, observe_event)
+                    body = body_result.get("body", "")
+                    exchanges.append({"request_id": request_id, "response_body": body[:100000],
+                                      "base64Encoded": body_result.get("base64Encoded", False)})
+                except Exception:
+                    continue
+            result["network_events"] = network_events[:500]
+            result["response_bodies"] = exchanges
             return json.dumps(result, ensure_ascii=False)
         finally:
             # 清掉可能残留的 dialog：XSS payload 的 alert 若在 wait 窗口外才触发，
             # 会卡住 target 的 JS 执行，导致后续 CDP 操作 Connection timed out（进而误判卡死→重启 Chrome）。
             try:
-                ws.send(json.dumps({"id": 98, "method": "Page.handleJavaScriptDialog",
+                ws.send(json.dumps({"id": alloc(), "method": "Page.handleJavaScriptDialog",
                                     "params": {"accept": True}}))
             except Exception:
                 pass
+            if scope_gate is not None:
+                try:
+                    self._cdp_command_with_events(ws, "Fetch.disable", {}, 2, None, "TEST", alloc)
+                except Exception:
+                    pass
+                try:
+                    self._cdp_command_with_events(ws, "Network.disable", {}, 2, None, "TEST", alloc)
+                except Exception:
+                    pass
             ws.close()
 
     def clear_dialogs(self, tab=None, test_tab=False):
@@ -512,17 +690,31 @@ class CDPClient:
             pass
 
     def read_page_text(self, tab=None, timeout=10, test_tab=False):
+        def _strip_title(text, ws_url):
+            # 黑盒测试防泄露：剥掉 <title>（lab 名称常直接写明漏洞类型），替换成中性占位
+            try:
+                t = self._cdp_eval(ws_url, "document.title", 3)
+                if t and t.strip():
+                    return text.replace(t.strip(), "[LAB]")
+            except Exception:
+                pass
+            return text
+
         if test_tab:
             return self._resilient(
-                0, lambda target: self._cdp_eval(
-                    target["ws"], "document.body ? document.body.innerText : ''", timeout),
+                0, lambda target: _strip_title(
+                    self._cdp_eval(
+                        target["ws"], "document.body ? document.body.innerText : ''", timeout),
+                    target["ws"]),
                 test_tab=True)
         if tab is None:
             tab = self._get_tab(0)
         ws_url = tab.get("ws")
         if not ws_url:
             raise CDPError("该 tab 没有 webSocketDebuggerUrl")
-        return self._cdp_eval(ws_url, "document.body ? document.body.innerText : ''", timeout)
+        return _strip_title(
+            self._cdp_eval(ws_url, "document.body ? document.body.innerText : ''", timeout),
+            ws_url)
 
     def read_page_html(self, tab=None, timeout=10, test_tab=False):
         if test_tab:
@@ -536,6 +728,44 @@ class CDPClient:
         if not ws_url:
             raise CDPError("该 tab 没有 webSocketDebuggerUrl")
         return self._cdp_eval(ws_url, "document.documentElement.outerHTML", timeout)
+
+    def capture_screenshot(self, tab=None, test_tab=False):
+        """Capture a PNG screenshot from a selected page; return base64 data."""
+        if test_tab:
+            return self._resilient(0, lambda target: self._cdp_cmd(
+                target["ws"], "Page.captureScreenshot", {"format": "png", "captureBeyondViewport": False})
+                .get("data", ""), test_tab=True)
+        if tab is None:
+            tab = self._get_tab(0)
+        ws_url = tab.get("ws")
+        if not ws_url:
+            raise CDPError("该 tab 没有 webSocketDebuggerUrl")
+        return self._cdp_cmd(ws_url, "Page.captureScreenshot",
+                             {"format": "png", "captureBeyondViewport": False}).get("data", "")
+
+    def read_element(self, selector, tab=None, timeout=10, test_tab=False):
+        """读指定 CSS selector 元素的属性（tagName/value/readonly/disabled/attributes）。
+        判断表单字段是否只读/禁用、回显值用。找不到返回 {"found": false}。"""
+        import json as _json
+        js = ("(function(){"
+              "var el=document.querySelector(" + _json.dumps(selector) + ");"
+              "if(!el) return JSON.stringify({found:false});"
+              "var attrs={};"
+              "for(var i=0;i<el.attributes.length;i++){attrs[el.attributes[i].name]=el.attributes[i].value;}"
+              "return JSON.stringify({found:true,tagName:el.tagName,value:el.value||'',"
+              "readonly:!!el.readOnly,disabled:!!el.disabled,type:el.type||'',name:el.name||'',"
+              "placeholder:el.placeholder||'',attributes:attrs,outerHTML:el.outerHTML.slice(0,500)});"
+              "})()")
+        if test_tab:
+            return self._resilient(
+                0, lambda target: self._cdp_eval(target["ws"], js, timeout),
+                test_tab=True)
+        if tab is None:
+            tab = self._get_tab(0)
+        ws_url = tab.get("ws")
+        if not ws_url:
+            raise CDPError("该 tab 没有 webSocketDebuggerUrl")
+        return self._cdp_eval(ws_url, js, timeout)
 
     def guide_tour(self, steps, index=0, test_tab=False):
         """注入「AI 引导光标」+ 说明气泡，手动一步步推进（用户点「下一步」才继续，不自动播放）。

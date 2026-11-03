@@ -44,6 +44,10 @@ HELP = """命令:
   /jobs         列出后台任务（判分 / skill 改进）
   /job N        看第 N 个后台任务详情/进度
   /cancel N     中断第 N 个后台任务
+  /task <url>       按已批准 authorized_scope 启动五 Agent 测试工作流
+  /task status ID   查看持久任务状态/阶段
+  /task recover ID  将重启后残留的运行任务标记为待恢复
+  /task resume ID   从安全的首个未完成阶段继续（攻击中断需人工复核）
   /exit         退出（也可用 exit / quit / Ctrl+C）
   其它任意输入发给 LLM（可自动调用浏览器/skill/eval 工具）
 """
@@ -413,6 +417,62 @@ def chat_loop():
                 print("用法：/cancel N")
                 continue
             print(f"已请求中断 #{jid}" if jobs.cancel(jid) else f"无法中断 #{jid}（不存在或已结束）")
+            continue
+        if line.startswith("/task "):
+            task_args = line[len("/task "):].strip().split()
+            if task_args and task_args[0] in {"status", "recover", "resume"}:
+                if len(task_args) != 2:
+                    print("用法：/task status|recover|resume TASK_ID")
+                    continue
+                action, task_id = task_args
+                try:
+                    from .config import app_root
+                    from .workflow import WorkflowService
+                    workflow = WorkflowService(cfg, client, jobs, ensure_cdp_client,
+                                               app_root() / "memorys" / "workflow")
+                    if action == "status":
+                        task = workflow.get_task(task_id)
+                        if not task:
+                            print(f"没有任务 {task_id}")
+                        else:
+                            print(json.dumps({"task_id": task_id, "status": task["status"],
+                                              "results": sorted(task.get("results", {})),
+                                              "recovery_required": task.get("recovery_required", False),
+                                              "timeline": workflow.task_timeline(task_id)}, ensure_ascii=False, indent=2))
+                    elif action == "recover":
+                        task = workflow.recover_task(task_id)
+                        print(f"任务 {task_id} 已标记为 PARTIAL；请检查证据后运行 /task resume {task_id}")
+                    else:
+                        job = jobs.submit("five_agent_workflow_resume",
+                                          lambda background_job: workflow.run_task(
+                                              task_id, cancel_check=lambda: background_job.cancelled, resume=True,
+                                              cancel_event=background_job.cancel_event),
+                                          title=f"恢复工作流 {task_id[:14]}")
+                        print(f"已提交恢复任务 #{job.id}；用 /job {job.id} 查看。")
+                except Exception as exc:
+                    print(_c(f"[task] 操作失败：{type(exc).__name__}: {exc}", "red"))
+                continue
+            target_url = " ".join(task_args)
+            scope = cfg.get("authorized_scope")
+            if not scope or scope.get("approved") is not True:
+                print(_yellow("未配置经你明确批准的 authorized_scope。请在 config.json 中配置并确认目标、路径、方法、操作权限及过期时间。"))
+                continue
+            try:
+                from .config import app_root
+                from .workflow import WorkflowService
+                workflow = WorkflowService(cfg, client, jobs, ensure_cdp_client,
+                                           app_root() / "memorys" / "workflow")
+                target = {"target_id": "target_" + str(abs(hash(target_url))), "base_url": target_url,
+                          "environment": "unknown"}
+                task = workflow.create_task(target, scope, user_request="用户启动的授权安全测试")
+                job = jobs.submit("five_agent_workflow",
+                                  lambda background_job: workflow.run_task(task["task_id"],
+                                                                           cancel_check=lambda: background_job.cancelled,
+                                                                           cancel_event=background_job.cancel_event),
+                                  title=f"五 Agent 工作流 {task['task_id'][:14]}")
+                print(f"已提交工作流后台任务 #{job.id}；Task ID: {task['task_id']}。用 /job {job.id} 查看进度。")
+            except Exception as exc:
+                print(_c(f"[task] 无法启动：{type(exc).__name__}: {exc}", "red"))
             continue
         if line == "/guide":
             _handle_guide(ensure_cdp_client, client)

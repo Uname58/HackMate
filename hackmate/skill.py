@@ -172,7 +172,8 @@ def _fmt_score(s):
 
 # ---- 完整改进编排（作为 Job 跑）----
 def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
-                    hidden_sample=10, dev_sample=10, trials=1):
+                    hidden_sample=10, dev_sample=10, trials=1, research_knowledge="",
+                    return_details=False, strict_eval=False):
     """before 判分 → 产候选 → after 判分 → gate。供 JobManager.submit 调用。
 
     训练/考试隔离（防背题）：
@@ -190,6 +191,10 @@ def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
     regression = ev.load_group(vuln, "regression")
     hidden = ev.sample_hidden_round(vuln, size=hidden_sample)
     degraded = False
+    if strict_eval and (not regression or not hidden):
+        summary = "Research Skill update requires both regression and hidden Eval cases."
+        return {"kept": False, "skill_ref": vpath.relative_to(BASE_DIR).as_posix(),
+                "summary": summary, "reason": summary} if return_details else summary
     if not regression and not hidden:
         # 非 xss vuln 冷启动：没有留出考卷（regression/hidden），降级用 dev 判分。
         # improver 见过 dev，防背题弱、判分偏乐观，但至少能跑 gate 改 skill；留出考卷攒够后自动走正路。
@@ -199,6 +204,10 @@ def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
         degraded = True
 
     current = vpath.read_text(encoding="utf-8") if vpath.exists() else ""
+    if research_knowledge and not current.strip():
+        summary = f"Research Skill update refused: existing skill file is missing for {vuln}/{variant}."
+        return {"kept": False, "skill_ref": vpath.relative_to(BASE_DIR).as_posix(),
+                "summary": summary, "reason": summary} if return_details else summary
 
     # 产 payload 用快模型（空 system、独立上下文）；评委用快模型（独立评审 system）
     produce_client = base_client.clone(system_prompt="", model=cfg["model"])
@@ -226,7 +235,8 @@ def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
 
     job.set_progress(f"生成候选（针对 {min(len(dev_failures), 3)} 个 dev 失败 case）...")
     candidate = improver.generate_candidate(
-        cfg, base_client, vuln, variant, current, dev_failures)
+        cfg, base_client, vuln, variant, current, dev_failures,
+        research_knowledge=research_knowledge)
     job.check_cancel()
 
     job.set_progress("验收判分（after）+ gate ...")
@@ -239,4 +249,8 @@ def run_improvement(job, cfg, base_client, vuln, variant, cdp=None,
     else:
         verb = "已回滚"
     note = "（降级判分：留出考卷不足，用 dev 判分，防背题弱）" if degraded else ""
-    return f"{tag} skill '{vuln}/{variant}'：{_fmt_score(before)} → {_fmt_score(after)}，{verb}{note}"
+    summary = f"{tag} skill '{vuln}/{variant}'：{_fmt_score(before)} → {_fmt_score(after)}，{verb}{note}"
+    if return_details:
+        return {"kept": bool(kept), "skill_ref": vpath.relative_to(BASE_DIR).as_posix(),
+                "summary": summary, "before": before, "after": after}
+    return summary

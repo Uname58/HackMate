@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/evidence.schema.json",
+  "title": "Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evidence_id", "task_id", "kind", "source_agent", "captured_at", "storage_ref", "sha256", "redaction_status"],
+  "properties": {
+    "evidence_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "kind": {"enum": ["http_request", "http_response", "browser_screenshot", "cdp_event", "tool_output", "payload", "execution_log", "research_source", "evaluation", "skill_evaluation", "writeup", "finding"]},
+    "source_agent": {"enum": ["recon", "analyze", "attacker", "reporter", "commander", "system", "research", "eval", "skill_eval"]},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "storage_ref": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+    "content_type": {"type": ["string", "null"]},
+    "redaction_status": {"enum": ["not_required", "redacted", "pending", "best_effort"]},
+    "metadata": {"type": "object"}
+  }
+}

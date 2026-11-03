@@ -26,11 +26,16 @@ DEFAULTS = {
     "cdp_host": "localhost",
     "cdp_port": 9222,
     "mcp_servers": [],
+    "verify_ttl_days": 30,
+    "verify_max_consecutive_fail": 3,
+    "authorized_scope": None,
 }
 
 # 这些 key 允许被 config 文件 / 环境变量覆盖
 _KEYS = ("api_key", "base_url", "model", "skill_model", "system_prompt",
-         "cdp_host", "cdp_port", "mcp_servers", "provider", "providers")
+         "cdp_host", "cdp_port", "mcp_servers", "provider", "providers",
+         "verify_ttl_days", "verify_max_consecutive_fail")
+_KEYS = _KEYS + ("authorized_scope",)
 
 # 内置 LLM 供应商预设（/model 命令弹出选择用）。compat=False 表示非 OpenAI 兼容端点，需 adapter。
 PRESET_PROVIDERS = {
@@ -112,10 +117,17 @@ def load_config():
         ("HACKMATE_SYSTEM_PROMPT", "system_prompt"),
         ("HACKMATE_CDP_HOST", "cdp_host"),
         ("HACKMATE_CDP_PORT", "cdp_port"),
+        ("HACKMATE_AUTHORIZED_SCOPE", "authorized_scope"),
     ):
         v = os.environ.get(env)
         if v:
-            cfg[key] = v
+            if key == "authorized_scope":
+                try:
+                    cfg[key] = json.loads(v)
+                except json.JSONDecodeError:
+                    print("[warn] HACKMATE_AUTHORIZED_SCOPE 必须是 JSON")
+            else:
+                cfg[key] = v
 
     # 展开当前 provider 到顶层 base_url/api_key/model（多 provider 运行时切换用）
     provider = cfg.get("provider", "")

@@ -1,8 +1,8 @@
-# HackMate v2
+# HackMate v4
 
 Human-in-the-loop AI 渗透测试副驾驶（red team copilot）。人类主力测试，AI 辅助侦察 / 源码分析 / 注入点 / payload / 验证。
 
-**核心卖点是「自主变强闭环」**：打靶场 → 自动沉淀经验成 skill → eval gate 验证「变强没变弱」→ 涨保留 / 跌回滚。差异化在于能**验证自身改进是否有效**，而非被动问答。当前闭环能力面锁定 **Reflected XSS**（DOM / Stored 的知识文件在 `skills/` 保留，但闭环只锁反射型）。
+**核心卖点是「自主变强闭环」**：打靶场 → 自动沉淀经验成 skill → eval gate 验证「变强没变弱」→ 涨保留 / 跌回滚。首个五 Agent 闭环为 **Reflected XSS**；后续还覆盖 SQLi、CMDi、信息泄露、WordPress 组件漏洞等机器擅长的技术测试领域。
 
 > 架构定稿与 v1 差异记录见 [DESIGN.md](DESIGN.md)。本文件只放定向信息与随时间变化的状态。
 
@@ -18,6 +18,11 @@ Human-in-the-loop AI 渗透测试副驾驶（red team copilot）。人类主力�
 三支柱 + 裁判 + Job 层：**memory**（长 `long/` 永久 · 中 `project/current.md` 重开保留 · 短对话 + 步骤日志 `log.jsonl`）· **skill**（`skills/<vuln>/` 纯知识点 + cases + caution）· **tool**（`tools.py` 表驱动注册表）· **eval**（case → 产 payload → 判分阶梯 → gate）· **jobs**（后台单 worker 线程，主循环不阻塞）。
 模块（`hackmate/`，13 个）：`config` · `llm` · `repl` · `jobs` · `tools` · `cdp` · `memory` · `grader` · `eval` · `improver` · `skill` · `log`。
 
+## 五 Agent 后续架构
+- Recon（事实收集）→ Analyze（假设/计划）→ Attacker（按计划验证）→ Reporter（独立审原始证据）→ Commander（唯一用户沟通与调度）。Python Orchestrator 控制状态，Agent 通过版本化 JSON Schema 交接；采用工具执行 + LLM 推理，不要求五个独立模型。
+- 统一 Scope / Permission Gate 默认拒绝未授权范围，`IMPACT` 默认禁止。Reporter 必须独立读取 Evidence Repository 原始材料。
+- 当前是增量迁移：`/task` 和 Web 工作台都已接入工作流服务，但旧 CLI/Web 单 LLM 对话路径仍保留。当前 Attacker 只启用 Reflected XSS 适配器；SQLi、CMDi、信息泄露、WordPress 组件/CVE 是后续扩展域。以 `DESIGN.md` 和 `docs/architecture/` 的验证状态为准。
+
 关键机制：
 - **语义判分阶梯** `browser → fast → judge → fallback`，对 regression + hidden 统一生效（解 v1「expected 字面匹配→等价 payload 假低分→gate 假回滚」）。expected 降级为喂评委的参考解。
 - **训练/考试隔离（防背题）**：`improve_skill` 只从 `dev`（训练集，improver 可见）的失败反哺；gate 的 before/after 只在 `regression + hidden`（留出考卷，improver 永不接触）上判分。三组 id 互不重叠。`save_case` 自动沉淀的 case 写入 **`dev`**（打过的靶场=训练材料），不写考卷。「变强」= 在没见过的题上真涨，而非记住喂进去的答案。
@@ -27,7 +32,7 @@ Human-in-the-loop AI 渗透测试副驾驶（red team copilot）。人类主力�
 - 后台用**单 worker 线程**（非 asyncio）：贴合现有同步/阻塞 socket/阻塞 stdin，零依赖够用。
 - case schema v2：`context / reference_payload / principle / verify_url / source`，清掉 v1 的 expected/keyword/grader 混用。
 - 工具**表驱动**，删 `tools/*/schema.json` + `how2use.md`，schema 与 handler 合一=单一真相源。
-- **权限层去掉**（v1 本就没落地）。
+- **历史 v2 决定：权限层去掉**（v1 本就没落地）；被 2026-11 五 Agent 设计取代，后续工具统一经过 Scope / Permission Gate。
 - CDP 原生 Windows **不走代理、直连启动 Chrome**（代理 bind `0.0.0.0:9222` 与 Chrome `127.0.0.1:9222` 重叠 → WinError 10048；代理只对 WSL 必需）。
 
 ## 当前状态（2026-10）

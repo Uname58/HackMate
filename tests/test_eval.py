@@ -1,6 +1,6 @@
 """eval / grader / gate 功能测试（mock LLM，不烧 API）。
 
-跑法：cd HackMate-v2 && python tests/test_eval.py
+跑法：cd HackMate-v4 && python tests/test_eval.py
 """
 import sys
 import json

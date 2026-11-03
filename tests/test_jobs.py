@@ -1,6 +1,6 @@
 """后台 Job 模型测试：生命周期 / 进度 / 协作式取消 / 异常兜底。
 
-跑法：cd HackMate-v2 && python tests/test_jobs.py
+跑法：cd HackMate-v4 && python tests/test_jobs.py
 """
 import sys
 import time

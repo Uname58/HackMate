@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/attacker_action.schema.json",
+  "title": "AttackerAction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["hypothesis_id", "tool_request", "payloads", "decision", "reason", "limitations"],
+  "properties": {
+    "hypothesis_id": {"type": "string", "minLength": 1},
+    "tool_request": {"type": ["object", "null"], "required": ["tool", "args"], "properties": {"tool": {"type": "string", "minLength": 1}, "args": {"type": "object"}}, "additionalProperties": false},
+    "payloads": {"type": "array", "items": {"type": "string"}},
+    "decision": {"enum": ["continue", "stop", "confirmed", "blocked"]},
+    "reason": {"type": "string"},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}

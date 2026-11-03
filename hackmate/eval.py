@@ -137,6 +137,10 @@ def score_group(cases, content, produce_client, judges, cdp, trials, tag, job=No
         if job is not None:
             job.check_cancel()
             job.set_progress(f"{tag} {i}/{len(cases)} {c.get('id', '?')}")
+        if cdp is not None and hasattr(cdp, "check_case"):
+            # A scope-bound adapter rejects an unauthorized Eval URL before any LLM
+            # or browser work begins; browser-grader fallback must not hide this denial.
+            cdp.check_case(c, vuln=vuln)
         last_payload, last_ok = "", False
         for _ in range(trials):
             prompt = _PRODUCE_PROMPT.format(content=content, context=grader.ctx(c), vuln=vuln or "目标")

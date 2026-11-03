@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/commander_result.schema.json",
+  "title": "CommanderResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "agent", "status", "reporter_verdict", "next_action", "summary"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "task_id": {"type": "string", "minLength": 1},
+    "agent": {"const": "commander"},
+    "status": {"enum": ["COMPLETED", "PARTIAL", "BLOCKED", "FAILED", "CANCELLED"]},
+    "reporter_verdict": {"enum": ["accepted", "rejected", "needs_more_evidence", "missing"]},
+    "next_action": {"enum": ["completed", "request_more_evidence", "manual_review", "none"]},
+    "summary": {"type": "string", "minLength": 1}
+  }
+}

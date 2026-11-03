@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/recon_result.schema.json",
+  "title": "ReconResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["target", "technologies", "infrastructure", "endpoints", "authentication", "observations", "evidence_refs", "limitations"],
+  "properties": {
+    "target": {"$ref": "target.schema.json"},
+    "technologies": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
+    "infrastructure": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
+    "endpoints": {"type": "array", "items": {"type": "object", "required": ["url", "method", "parameters", "evidence_refs"], "properties": {"url": {"type": "string", "format": "uri"}, "method": {"type": "string"}, "parameters": {"type": "array", "items": {"type": "object", "required": ["name", "location"], "properties": {"name": {"type": "string"}, "location": {"enum": ["query", "path", "form", "header", "cookie", "json", "unknown"]}}, "additionalProperties": false}}, "evidence_refs": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}},
+    "authentication": {"enum": ["authenticated", "unauthenticated", "unknown"]},
+    "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {"observation": {"type": "object", "required": ["value", "confidence", "evidence_refs"], "properties": {"value": {}, "confidence": {"enum": ["observed", "high", "medium", "low", "unknown"]}, "evidence_refs": {"type": "array", "items": {"type": "string"}}, "note": {"type": "string"}}, "additionalProperties": false}}
+}

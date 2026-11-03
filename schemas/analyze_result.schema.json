@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/analyze_result.schema.json",
+  "title": "AnalyzeResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["attack_surface", "input_point", "hypotheses", "test_plan", "limitations"],
+  "properties": {
+    "attack_surface": {"type": "array", "items": {"type": "string"}},
+    "input_point": {"type": "object", "required": ["endpoint", "parameter", "location"], "properties": {"endpoint": {"type": "string", "format": "uri"}, "parameter": {"type": "string"}, "location": {"type": "string"}}, "additionalProperties": false},
+    "hypotheses": {"type": "array", "items": {"type": "object", "required": ["hypothesis_id", "type", "reasoning", "priority", "evidence_refs"], "properties": {"hypothesis_id": {"type": "string"}, "type": {"type": "string"}, "reasoning": {"type": "string"}, "priority": {"enum": ["critical", "high", "medium", "low"]}, "evidence_refs": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}},
+    "test_plan": {"type": "array", "items": {"type": "object", "required": ["step_id", "test_type", "objective", "expected_evidence"], "properties": {"step_id": {"type": "string"}, "test_type": {"type": "string"}, "objective": {"type": "string"}, "tool_capabilities": {"type": "array", "items": {"type": "string"}}, "expected_evidence": {"type": "array", "items": {"type": "string"}}, "constraints": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}

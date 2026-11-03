@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/finding.schema.json",
+  "title": "Finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["finding_id", "task_id", "hypothesis_id", "type", "verdict", "evidence_refs", "reviewer_run_id"],
+  "properties": {
+    "finding_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "hypothesis_id": {"type": "string", "minLength": 1},
+    "type": {"type": "string", "minLength": 1},
+    "title": {"type": ["string", "null"]},
+    "endpoint": {"type": ["string", "null"], "format": "uri"},
+    "parameter": {"type": ["string", "null"]},
+    "verdict": {"enum": ["accepted", "rejected", "needs_more_evidence"]},
+    "impact": {"type": ["string", "null"]},
+    "cvss_score": {"type": ["number", "null"], "minimum": 0, "maximum": 10},
+    "cvss_vector": {"type": ["string", "null"]},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "writeup_ref": {"type": ["string", "null"]},
+    "reviewer_run_id": {"type": "string", "minLength": 1}
+  }
+}

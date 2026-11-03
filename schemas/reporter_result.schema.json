@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hackmate.local/schemas/reporter_result.schema.json",
+  "title": "ReporterResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "finding", "reproduction_steps", "false_positive_checks", "evidence_reviewed", "reproducibility", "impact_assessment", "evidence_refs", "writeup_ref", "finding_ref", "limitations"],
+  "properties": {
+    "verdict": {"enum": ["accepted", "rejected", "needs_more_evidence"]},
+    "finding": {"type": ["object", "null"], "additionalProperties": false, "required": ["type", "title", "endpoint", "parameter", "impact"], "properties": {"type": {"type": ["string", "null"]}, "title": {"type": ["string", "null"]}, "endpoint": {"type": ["string", "null"], "format": "uri"}, "parameter": {"type": ["string", "null"]}, "impact": {"type": ["string", "null"]}}},
+    "reproduction_steps": {"type": "array", "items": {"type": "string"}},
+    "false_positive_checks": {"type": "array", "items": {"type": "string"}},
+    "evidence_reviewed": {"type": "array", "items": {"type": "string"}},
+    "reproducibility": {"enum": ["reproducible", "not_reproducible", "not_assessed"]},
+    "impact_assessment": {"type": "string"},
+    "cvss_score": {"type": ["number", "null"], "minimum": 0, "maximum": 10},
+    "cvss_vector": {"type": ["string", "null"]},
+    "writeup_ref": {"type": ["string", "null"]},
+    "finding_ref": {"type": ["string", "null"]},
+    "rejection_reason": {"type": ["string", "null"]},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}
