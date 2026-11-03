@@ -220,11 +220,11 @@ def request_target(tool_name, args):
         # Conservative extraction of explicit HTTP(S) URLs from CLI arguments.
         import re
         match = re.search(r"https?://[^\s'\"]+", str(args.get("args", "")))
-        url = match.group(0).rstrip(",;")
+        url = match.group(0).rstrip(",;") if match else url
     elif tool_name == "run_shell":
         import re
         match = re.search(r"https?://[^\s'\"]+", str(args.get("command", "")))
-        url = match.group(0).rstrip(",;")
+        url = match.group(0).rstrip(",;") if match else url
     return url
 
 
