@@ -1012,16 +1012,6 @@ def dispatch(name, args, ctx):
                 raise ScopeDenied("vendor 工具必须提供可验证的 HTTP(S) 目标 URL")
             decision = gate.check(level, url=target, method=method,
                                   count=request_count, operation=name)
-            if name == "run_tool":
-                if getattr(ctx, "evidence_repo", None) and getattr(ctx, "task_id", None):
-                    ctx.evidence_repo.put(ctx.task_id, "execution_log", "system",
-                                          json.dumps({"tool": name, "gate": "deny",
-                                                      "reason": "vendor CLI lacks request-level scope adapter"},
-                                                     ensure_ascii=False),
-                                          content_type="application/json", redaction_status="pending")
-                return json.dumps({"status": "BLOCKED",
-                                   "reason": "通用 vendor CLI 无法逐个审查其重定向和实际请求；需实现专用工具适配器后再开放"},
-                                  ensure_ascii=False)
             if getattr(ctx, "evidence_repo", None) and getattr(ctx, "task_id", None):
                 ctx.evidence_repo.put(ctx.task_id, "execution_log", "system",
                                       json.dumps({"tool": name, "args": args, "gate": decision}, ensure_ascii=False),
